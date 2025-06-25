@@ -20,12 +20,19 @@ app = Flask(__name__)
 
 @app.route('/') 
 def index(): 
-    #btn_name = "button"
-    return get_html_base("""
-    <a href="/product">
-        <button type="button" class="btn btn-primary">Click!</button>
-    </a>
-    """)
+    products = [
+        {"name": "Alice", "id": 30, "brand": "Nueva York"},
+        {"name": "Bob", "id": 25, "brand": "Los Ángeles"},
+        {"name": "Charlie", "id": 35, "brand": "Chicago"}
+    ]
+    result = ""
+    for x in products:
+        result += f"<li>{x['name']}</li>"
+    return get_html_base("""                    
+    <ul>
+        {result}
+    </ul>
+    """.format(result=result))
 # return get_html_base(f'<button type="{btn_name}" class="btn btn-primary">Haz clic</button>')
 
 
