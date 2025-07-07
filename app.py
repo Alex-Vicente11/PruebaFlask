@@ -1,5 +1,5 @@
-from flask import Flask, render_template, request, url_for, redirect  #flasks es una clase
-
+from flask import Flask, render_template, request, url_for, redirect, jsonify #flasks es una clase
+from flask_mysqldb import MySQL
 def get_html_base (body):
 
      return """<!DOCTYPE html>
@@ -18,21 +18,54 @@ def get_html_base (body):
 
 app = Flask(__name__) 
 
-@app.route('/') 
-def index(): 
-    products = [
-        {"name": "Alice", "id": 30, "brand": "Nueva York"},
-        {"name": "Bob", "id": 25, "brand": "Los Ángeles"},
-        {"name": "Charlie", "id": 35, "brand": "Chicago"}
-    ]
-    result = ""
-    for x in products:
-        result += f"<li>{x['name']}</li>"
-    return get_html_base("""                    
-    <ul>
-        {result}
-    </ul>
-    """.format(result=result))
+# Conexión MySQL
+app.config['MYSQL_HOST'] = 'localhost'
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = 'Relic11&'
+app.config['MYSQL_DB'] = 'list_products'
+
+conexion = MySQL(app)
+
+@app.route('/home') 
+def home():
+    try: 
+        cursor = conexion.connection.cursor()
+        sql="SELECT id, product, price FROM products ORDER BY id DESC"
+        cursor.execute(sql)
+        products = cursor.fetchall()
+
+        result = ""
+        for x in products:
+            result += f"<li class='list-group-item list-group-item-action'>ID: {x[0]} - Producto: {x[1]} - Precio: {x[2]}</li>"
+
+        html_content = f"""
+        <div class="row">
+            <h2 class="col-mb-6 offset-md-3"> Lista de productos</h2>
+                <ul class="col-mb-6 offset-md-3 list-group">
+                    {result}
+                </ul>
+        </div>
+        """
+        return get_html_base(html_content)
+    
+    except Exception as ex:
+        return get_html_base(f"<div class='alert alert-danger'>Error al consultar productos: {str(ex)}</div>")
+
+
+#def index(): 
+#    products = [
+#        {"name": "Alice", "id": 30, "brand": "Nueva York"},
+#        {"name": "Bob", "id": 25, "brand": "Los Ángeles"},
+#        {"name": "Charlie", "id": 35, "brand": "Chicago"}
+#    ]
+#    result = ""
+#    for x in products:
+#        result += f"<li>{x['name']}</li>"
+#    return get_html_base("""                    
+#    <ul>
+#        {result}
+#    </ul>
+#    """.format(result=result))
 # return get_html_base(f'<button type="{btn_name}" class="btn btn-primary">Haz clic</button>')
 
 
@@ -94,15 +127,15 @@ def query_string():  #se considera una vista?
     return "OK"      #necesariamente se debe retornar algo
 #en la pag web, ? indica que se pasan parametros (param1=jose)
 
-def pagina_no_encontrada(error): #control de paginas con error 404
+#def pagina_no_encontrada(error): #control de paginas con error 404
     #return render_template('404.html'), 404  #404 es el codigo de error asociado a una pagina no encontrada
-    return redirect(url_for('index'))  #aqui se redirije a la ventana (vista) de index en caso de error
+ #   return redirect(url_for('index'))  #aqui se redirije a la ventana (vista) de index en caso de error
 #url_for indica a la url asociada a la vista(index)
 
 
 if __name__=='__main__': #se comprueba la aplicacion
     app.add_url_rule('/query_string',view_func=query_string) #aqui se enlaza la funcion a la url
-    app.register_error_handler(404, pagina_no_encontrada)    #se registra el manejador de error que apunte a la funcion pag_no_encontrada
+#   app.register_error_handler(404, pagina_no_encontrada)    #se registra el manejador de error que apunte a la funcion pag_no_encontrada
     app.run(debug=True, port=5000)  #aqui se corre el programa
 
 #observar el estado de Debug mode: ctrl + c detengo el servidor
