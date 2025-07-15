@@ -1,5 +1,5 @@
-from flask import Flask, render_template, request, url_for, redirect, jsonify #flasks es una clase
-from flask_mysqldb import MySQL
+from flask import Flask, render_template, request, url_for, redirect, jsonify
+import pymysql
 def get_html_base (body):
 
      return """<!DOCTYPE html>
@@ -18,28 +18,163 @@ def get_html_base (body):
 
 app = Flask(__name__) 
 
-# Conexión MySQL
-app.config['MYSQL_HOST'] = 'localhost'
-app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = 'Relic11&'
-app.config['MYSQL_DB'] = 'list_products'
+# Configuración MySQL
+def get_db_connection():
+    return pymysql.connect(
+        host='localhost',
+        user='root',
+        password='',
+        database='list_products',
+        cursorclass=pymysql.cursors.DictCursor
+    )
 
-conexion = MySQL(app)
+# CRUD REST Endpoints para productos
 
+# GET /products - Obtener todos los productos
+@app.route('/products', methods=['GET'])
+def get_products():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id, id_product, product, price FROM products")
+            productos = cursor.fetchall()
+            
+        connection.close()
+        return jsonify(productos), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# GET /products/<id> - Obtener un producto por ID
+@app.route('/products/<int:product_id>', methods=['GET'])
+def get_product(product_id):
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id, id_product, product, price FROM products WHERE id = %s", (product_id,))
+            producto = cursor.fetchone()
+            
+        connection.close()
+        
+        if producto:
+            return jsonify(producto), 200
+        else:
+            return jsonify({'error': 'Producto no encontrado'}), 404
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# POST /products - Crear un nuevo producto
+@app.route('/products', methods=['POST'])
+def create_product():
+    try:
+        data = request.get_json()
+        
+        if not data or 'id_product' not in data or 'product' not in data or 'price' not in data:
+            return jsonify({'error': 'Faltan campos requeridos: id_product, product, price'}), 400
+
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
+            cursor.execute(sql, (data['id_product'], data['product'], data['price']))
+            connection.commit()
+            new_id = cursor.lastrowid
+            
+        connection.close()
+        
+        return jsonify({
+            'message': 'Producto creado exitosamente',
+            'id': new_id
+        }), 201
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# PUT /products/<id> - Actualizar un producto
+@app.route('/products/<int:product_id>', methods=['PUT'])
+def update_product(product_id):
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No se enviaron datos'}), 400
+
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Verificar si el producto existe
+            cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Producto no encontrado'}), 404
+
+            # Construir query dinámicamente según campos enviados
+            fields = []
+            values = []
+            
+            if 'id_product' in data:
+                fields.append("id_product = %s")
+                values.append(data['id_product'])
+            if 'product' in data:
+                fields.append("product = %s")
+                values.append(data['product'])
+            if 'price' in data:
+                fields.append("price = %s")
+                values.append(data['price'])
+            
+            if not fields:
+                return jsonify({'error': 'No se enviaron campos para actualizar'}), 400
+
+            values.append(product_id)
+            sql = f"UPDATE products SET {', '.join(fields)} WHERE id = %s"
+            cursor.execute(sql, values)
+            connection.commit()
+            
+        connection.close()
+        
+        return jsonify({'message': 'Producto actualizado exitosamente'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# DELETE /products/<id> - Eliminar un producto
+@app.route('/products/<int:product_id>', methods=['DELETE'])
+def delete_product(product_id):
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Verificar si el producto existe
+            cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Producto no encontrado'}), 404
+
+            # Eliminar el producto
+            cursor.execute("DELETE FROM products WHERE id = %s", (product_id,))
+            connection.commit()
+            
+        connection.close()
+        
+        return jsonify({'message': 'Producto eliminado exitosamente'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Endpoint original (mantener compatibilidad)
 @app.route('/productos')
 def obtener_productos():
     try:
-        cursor = conexion.connection.cursor()
-        cursor.execute("SELECT id, product AS nombre, price FROM products")
-        rows = cursor.fetchall()
-
-        # Convertir resultados a lista de diccionarios
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id, product AS nombre, price FROM products")
+            rows = cursor.fetchall()
+            
+        connection.close()
+        
+        # Convertir a formato compatible
         productos = []
         for row in rows:
             productos.append({
-                'id': row[0],
-                'nombre': row[1],
-                'precio': float(row[2])
+                'id': row['id'],
+                'nombre': row['nombre'],
+                'precio': float(row['precio'])
             })
 
         return jsonify(productos)
@@ -56,21 +191,29 @@ def obtener_productos():
 @app.route('/home') 
 def home():
     try: 
-        cursor = conexion.connection.cursor()
-        sql="SELECT id_product, product, price FROM products ORDER BY id DESC"
-        cursor.execute(sql)
-        products = cursor.fetchall()
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            sql="SELECT id_product, product, price FROM products ORDER BY id DESC"
+            cursor.execute(sql)
+            products = cursor.fetchall()
+        
+        connection.close()
 
         result = ""
         for x in products:
-            result += f"<li class='list-group-item list-group-item-action'>ID: {x[0]} - Producto: {x[1]} - Precio: {x[2]}</li>"
+            result += f"<li class='list-group-item list-group-item-action'>ID: {x['id_product']} - Producto: {x['product']} - Precio: {x['price']}</li>"
 
         html_content = f"""
         <div class="row">
-            <h2 class="col-mb-6 offset-md-3"> Lista de productos</h2>
-                <ul class="col-mb-6 offset-md-3 list-group">
+            <div class="col-md-6 offset-md-3">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2>Lista de productos</h2>
+                    <a href="/add-product" class="btn btn-success">+ Agregar Producto</a>
+                </div>
+                <ul class="list-group">
                     {result}
                 </ul>
+            </div>
         </div>
         """
         return get_html_base(html_content)
@@ -81,6 +224,43 @@ def home():
 @app.route('/prueba')
 def prueba():
     return render_template('carrito.html')
+
+# Vista web para agregar productos
+@app.route('/add-product', methods=['GET', 'POST'])
+def add_product_web():
+    if request.method == 'GET':
+        return render_template('add_product.html')
+    
+    elif request.method == 'POST':
+        try:
+            # Obtener datos del formulario
+            id_product = request.form.get('id_product')
+            product = request.form.get('product')
+            price = request.form.get('price')
+            
+            # Validar campos requeridos
+            if not id_product or not product or not price:
+                return render_template('add_product.html', 
+                                     message='Todos los campos son requeridos', 
+                                     success=False)
+            
+            # Insertar en base de datos
+            connection = get_db_connection()
+            with connection.cursor() as cursor:
+                sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
+                cursor.execute(sql, (int(id_product), product, float(price)))
+                connection.commit()
+                
+            connection.close()
+            
+            return render_template('add_product.html', 
+                                 message=f'Producto "{product}" agregado exitosamente', 
+                                 success=True)
+            
+        except Exception as e:
+            return render_template('add_product.html', 
+                                 message=f'Error al agregar producto: {str(e)}', 
+                                 success=False)
 
 #def index(): 
 #    products = [
@@ -166,7 +346,7 @@ def query_string():  #se considera una vista?
 if __name__=='__main__': #se comprueba la aplicacion
     app.add_url_rule('/query_string',view_func=query_string) #aqui se enlaza la funcion a la url
 #   app.register_error_handler(404, pagina_no_encontrada)    #se registra el manejador de error que apunte a la funcion pag_no_encontrada
-    app.run(debug=True, port=5000)  #aqui se corre el programa
+    app.run(debug=True, port=5001)  #aqui se corre el programa
 
 #observar el estado de Debug mode: ctrl + c detengo el servidor
 #activar el modo depuracion, dentro de run(debug=true), aquí puedo determinar el puerto para la ejecucion
