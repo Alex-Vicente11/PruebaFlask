@@ -26,11 +26,38 @@ app.config['MYSQL_DB'] = 'list_products'
 
 conexion = MySQL(app)
 
+@app.route('/productos')
+def obtener_productos():
+    try:
+        cursor = conexion.connection.cursor()
+        cursor.execute("SELECT id, product AS nombre, price FROM products")
+        rows = cursor.fetchall()
+
+        # Convertir resultados a lista de diccionarios
+        productos = []
+        for row in rows:
+            productos.append({
+                'id': row[0],
+                'nombre': row[1],
+                'precio': float(row[2])
+            })
+
+        return jsonify(productos)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+
+
+
+
 @app.route('/home') 
 def home():
     try: 
         cursor = conexion.connection.cursor()
-        sql="SELECT id, product, price FROM products ORDER BY id DESC"
+        sql="SELECT id_product, product, price FROM products ORDER BY id DESC"
         cursor.execute(sql)
         products = cursor.fetchall()
 
@@ -51,6 +78,9 @@ def home():
     except Exception as ex:
         return get_html_base(f"<div class='alert alert-danger'>Error al consultar productos: {str(ex)}</div>")
 
+@app.route('/prueba')
+def prueba():
+    return render_template('carrito.html')
 
 #def index(): 
 #    products = [
