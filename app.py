@@ -23,13 +23,166 @@ def get_db_connection():
     return pymysql.connect(
         host='localhost',
         user='root',
-        password='',
+        password='Relic11&',
         database='list_products',
         cursorclass=pymysql.cursors.DictCursor
     )
 
-# CRUD REST Endpoints para productos
 
+# CRUD para usuario
+# GET /users - Obtener todos los usuarios
+@app.route('/users', methods=['GET'])
+def get_users():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id_user, user_name FROM user")
+            users = cursor.fetchall()
+
+        connection.close()
+        return jsonify(users), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+
+#GET /users/<id> - Obtener un usuario por ID
+@app.route('/users/<int:id_user>', methods=['GET'])
+def get_user(id_user):
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id_user, user_name FROM user WHERE id_user = %s", (id_user,))
+            user = cursor.fetchone()
+        
+        connection.close()
+
+        if user:
+            return jsonify(user), 200
+        else: 
+            return jsonify({'Error': 'usuario no encontrado'}),404
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}),500
+    
+# POST /users - crear un nuevo usuario
+@app.route('/users', methods=['POST'])
+def create_user():
+    try:
+        data = request.get_json()
+
+        if not data or 'id_user' not in data or 'user_name' not in data:
+            return jsonify({'error': 'Faltan campos requeridos: id_user, user_name'}), 400
+
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            sql = "INSERT INTO user (id_user, user_name) VALUES (%s, %s)" 
+            cursor.execute(sql, (data['id_user'], data['user_name']))
+            connection.commit()
+            new_id = cursor.lastrowid
+
+        connection.close()
+
+        return jsonify({
+            'message': 'Usuario creado exitosamente',
+            'id': new_id 
+        }), 201
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+
+# PUT /users/<id> - actualizar usuario
+@app.route('/users/<int:id_user>', methods=['PUT'])
+def update_user(id_user):
+    try:
+        data = request.get_json()
+
+        if not data: 
+            return jsonify({'error': 'No se enviaron datos' }), 400
+        
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id_user FROM user WHERE id_user = %s", (id_user,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Usuario no encontrado'}), 404
+            
+            fields = []
+            values = []
+
+            if 'id_user' in data:
+                fields.append("id_user = %s")
+                #values.append("id_user", data['id_user'])
+                values.append(data['id_user'])
+            if 'user_name' in data:
+                fields.append("user_name = %s")
+                #values.append("user_name", data['user_name'])
+                values.append(data['user_name'])
+
+            if not fields:
+                return jsonify({'error': 'No se enviaron datos para actualizar'}), 400
+            
+            values.append(id_user)
+            sql = f"UPDATE user SET {','.join(fields)} WHERE id_user = %s"
+            cursor.execute(sql,values)
+            connection.commit()
+
+        connection.close()
+
+        return jsonify({'message': 'Usuario actualizado exitosamente'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+
+# DELETE /users/<id> - Eliminar usuario
+@app.route('/users/<int:id_user>', methods=['DELETE'])
+def delete_user(id_user):
+    try: 
+        connection = get_db_connection()
+
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id_user FROM user WHERE id_user=%s", (id_user,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'El usuario no existe'}), 404
+            
+            cursor.execute("DELETE FROM user WHERE id_user=%s", (id_user,))
+            connection.commit()
+
+        connection.close()
+
+        return jsonify({'message': 'Usuario eliminado exitosamente'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+
+#EndPoint (mantener compatibilidad)
+@app.route('/usuarios')
+def obtener_usuarios():
+    try:
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT id_user AS id, user_name AS nombre FROM user")
+            rows = cursor.fetchall()
+
+        connection.close()
+
+        usuarios = []
+        for row in rows:
+            usuarios.append({
+                'id': row['id'],
+                'nombre': row['nombre']
+            })
+
+        return jsonify(usuarios)
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+# CRUD REST Endpoints para productos
 # GET /products - Obtener todos los productos
 @app.route('/products', methods=['GET'])
 def get_products():
@@ -163,7 +316,7 @@ def obtener_productos():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute("SELECT id, product AS nombre, price FROM products")
+            cursor.execute("SELECT id, product AS nombre, price AS precio FROM products")
             rows = cursor.fetchall()
             
         connection.close()
@@ -209,6 +362,7 @@ def home():
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2>Lista de productos</h2>
                     <a href="/add-product" class="btn btn-success">+ Agregar Producto</a>
+                    <a href="/add-user" class="btn btn-success">+ Agregar usuario</a>
                 </div>
                 <ul class="list-group">
                     {result}
@@ -224,6 +378,41 @@ def home():
 @app.route('/prueba')
 def prueba():
     return render_template('carrito.html')
+
+# vista web de usuario
+@app.route('/add-user', methods=['GET','POST'])
+def add_user():
+    if request.method == 'GET':
+        return render_template('add_user.html')
+    
+    elif request.method == 'POST':
+        try: 
+            id_user = request.form.get('id_user')
+            user_name = request.form.get('user_name')
+
+            if not id_user or not user_name:
+                return render_template('add_user.html',
+                                       message='Rellenar todos los campos',
+                                       success=False)
+            
+            connection = get_db_connection()
+            with connection.cursor() as cursor:
+                sql = "INSERT INTO user (id_user, user_name) VALUES (%s,%s)"
+                cursor.execute(sql, (int(id_user), user_name))
+                connection.commit()
+
+            connection.close()
+
+            return render_template('add_user.html',
+                                   message=f'Usuario "{user_name}" agregado exitosamente',
+                                   success=True)
+        
+        except Exception as e:
+            return render_template('add_user.html',
+                                   message= f'Error al agregar usuario: {str(e)}',
+                                   success= False)
+
+
 
 # Vista web para agregar productos
 @app.route('/add-product', methods=['GET', 'POST'])
@@ -259,7 +448,7 @@ def add_product_web():
             
         except Exception as e:
             return render_template('add_product.html', 
-                                 message=f'Error al agregar producto: {str(e)}', 
+                                 message=f'Error al agregar producto: {str(e)}', #aqui condicionar
                                  success=False)
 
 #def index(): 

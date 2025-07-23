@@ -1,0 +1,33 @@
+@app.route('/home') 
+def home():
+    data={}
+    try:
+        cursor=conexion.connection.cursor()
+        sql="SELECT id, product FROM products ORDER BY id DESC"
+        cursor.execute(sql)
+        rows=cursor.fetchall()
+        cursos=[{'id': row[0], 'product': row[1]} for row in rows]
+        #cursos=cursor.fetchall()
+        data['cursos'] = cursos
+        data['mensaje']='Exito'
+    except Exception as ex:
+        print("Error:", str(ex))
+        data['mensaje']='Error...'
+    return jsonify(data)
+
+
+#def index(): 
+#    products = [
+#        {"name": "Alice", "id": 30, "brand": "Nueva York"},
+#        {"name": "Bob", "id": 25, "brand": "Los Ángeles"},
+#        {"name": "Charlie", "id": 35, "brand": "Chicago"}
+#    ]
+#    result = ""
+#    for x in products:
+#        result += f"<li>{x['name']}</li>"
+#    return get_html_base("""                    
+#    <ul>
+#        {result}
+#    </ul>
+#    """.format(result=result))
+# return get_html_base(f'<button type="{btn_name}" class="btn btn-primary">Haz clic</button>')
