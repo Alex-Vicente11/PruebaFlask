@@ -23,7 +23,6 @@ def get_db_connection():
     return pymysql.connect(
         host='localhost',
         user='root',
-        password='Relic11&',
         database='list_products',
         cursorclass=pymysql.cursors.DictCursor
     )
@@ -71,21 +70,17 @@ def create_user():
     try:
         data = request.get_json()
 
-        if not data or 'id_user' not in data or 'user_name' not in data:
-            return jsonify({'error': 'Faltan campos requeridos: id_user, user_name'}), 400
-        
- #       id_user = data['id_user']
+        if not data or 'user_name' not in data:
+            return jsonify({'error': 'Faltan campos requeridos: user_name'}), 400
 
         connection = get_db_connection()
         with connection.cursor() as cursor:
- #           cursor.execute("SELECT id_user FROM user WHERE id_user = %s", (id_user))
- #           exist = cursor.fetchone()
-  #          if exist:
-   #             return jsonify({'error': 'El ID ya existen, prueba con otro'}), 400
-
+            # Obtener el siguiente ID disponible
+            cursor.execute("SELECT COALESCE(MAX(id_user), 0) + 1 FROM user")
+            id_user = cursor.fetchone()['COALESCE(MAX(id_user), 0) + 1']
 
             sql = "INSERT INTO user (id_user, user_name) VALUES (%s, %s)" 
-            cursor.execute(sql, (data['id_user'], data['user_name']))
+            cursor.execute(sql, (id_user, data['user_name']))
             connection.commit()
             new_id = cursor.lastrowid
 
@@ -231,21 +226,17 @@ def create_product():
     try:
         data = request.get_json()
         
-        if not data or 'id_product' not in data or 'product' not in data or 'price' not in data:
-            return jsonify({'error': 'Faltan campos requeridos: id_product, product, price'}), 400
-        
-        id_product = data['id_product']
+        if not data or 'product' not in data or 'price' not in data:
+            return jsonify({'error': 'Faltan campos requeridos: product, price'}), 400
 
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute("SELECT id_product FROM products WHERE id_product=%s", (id_product,))
-            exist = cursor.fetchone()
-            if exist:
-                return jsonify({'error': 'El ID ya existe, prueba con otro'}), 400
-            
+            # Obtener el siguiente ID disponible
+            cursor.execute("SELECT COALESCE(MAX(id_product), 0) + 1 FROM products")
+            id_product = cursor.fetchone()['COALESCE(MAX(id_product), 0) + 1']
             
             sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
-            cursor.execute(sql, (data['id_product'], data['product'], data['price']))
+            cursor.execute(sql, (id_product, data['product'], data['price']))
             connection.commit()
             new_id = cursor.lastrowid
             
@@ -403,28 +394,21 @@ def add_user():
     
     elif request.method == 'POST':
         try: 
-            id_user = request.form.get('id_user')
             user_name = request.form.get('user_name')
 
-            if not id_user or not user_name:
+            if not user_name:
                 return render_template('add_user.html',
                                        message='Rellenar todos los campos',
                                        success=False)
             
             connection = get_db_connection()
             with connection.cursor() as cursor:
-                cursor.execute("SELECT id_user FROM user WHERE id_user = %s", (id_user,))
-                exist = cursor.fetchone()
-                if exist:
-                    connection.close()
-                    return render_template('add_user.html',
-                                   message = f'El ID {id_user} ya existe, intenta con otro.',
-                                   success=False)
+                # Obtener el siguiente ID disponible
+                cursor.execute("SELECT COALESCE(MAX(id_user), 0) + 1 FROM user")
+                id_user = cursor.fetchone()['COALESCE(MAX(id_user), 0) + 1']
 
-
-            with connection.cursor() as cursor:
                 sql = "INSERT INTO user (id_user, user_name) VALUES (%s,%s)"
-                cursor.execute(sql, (int(id_user), user_name))
+                cursor.execute(sql, (id_user, user_name))
                 connection.commit()
 
             connection.close()
@@ -449,32 +433,25 @@ def add_product_web():
     elif request.method == 'POST':
         try:
             # Obtener datos del formulario
-            id_product = request.form.get('id_product')
             product = request.form.get('product')
             price = request.form.get('price')
             
             # Validar campos requeridos
-            if not id_product or not product or not price:
+            if not product or not price:
                 return render_template('add_product.html', 
                                      message='Todos los campos son requeridos', 
                                      success=False)
             
-            # Verificar si ya existe el id-product
             connection = get_db_connection()
             with connection.cursor() as cursor:
-                cursor.execute("SELECT id_product FROM products WHERE id_product = %s", (id_product,))
-                exist = cursor.fetchone()
-                if exist:
-                    connection.close()
-                    return render_template('add_product.html',
-                                           message = f'El ID {id_product} ya existe, intenta con otro.',
-                                            success=False)
+                # Obtener el siguiente ID disponible
+                cursor.execute("SELECT COALESCE(MAX(id_product), 0) + 1 FROM products")
+                id_product = cursor.fetchone()['COALESCE(MAX(id_product), 0) + 1']
                     
                 # Insertar en la base de datos 
-                with connection.cursor() as cursor:
-                    sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
-                    cursor.execute(sql, (int(id_product), product, float(price)))
-                    connection.commit()
+                sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
+                cursor.execute(sql, (id_product, product, float(price)))
+                connection.commit()
                 
             connection.close()
             
