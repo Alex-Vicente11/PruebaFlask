@@ -73,9 +73,17 @@ def create_user():
 
         if not data or 'id_user' not in data or 'user_name' not in data:
             return jsonify({'error': 'Faltan campos requeridos: id_user, user_name'}), 400
+        
+ #       id_user = data['id_user']
 
         connection = get_db_connection()
         with connection.cursor() as cursor:
+ #           cursor.execute("SELECT id_user FROM user WHERE id_user = %s", (id_user))
+ #           exist = cursor.fetchone()
+  #          if exist:
+   #             return jsonify({'error': 'El ID ya existen, prueba con otro'}), 400
+
+
             sql = "INSERT INTO user (id_user, user_name) VALUES (%s, %s)" 
             cursor.execute(sql, (data['id_user'], data['user_name']))
             connection.commit()
@@ -189,7 +197,7 @@ def get_products():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute("SELECT id, id_product, product, price FROM products")
+            cursor.execute("SELECT id_product, product, price FROM products")
             productos = cursor.fetchall()
             
         connection.close()
@@ -204,7 +212,7 @@ def get_product(product_id):
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute("SELECT id, id_product, product, price FROM products WHERE id = %s", (product_id,))
+            cursor.execute("SELECT id_product, product, price FROM products WHERE id = %s", (product_id,))
             producto = cursor.fetchone()
             
         connection.close()
@@ -225,9 +233,17 @@ def create_product():
         
         if not data or 'id_product' not in data or 'product' not in data or 'price' not in data:
             return jsonify({'error': 'Faltan campos requeridos: id_product, product, price'}), 400
+        
+        id_product = data['id_product']
 
         connection = get_db_connection()
         with connection.cursor() as cursor:
+            cursor.execute("SELECT id_product FROM products WHERE id_product=%s", (id_product,))
+            exist = cursor.fetchone()
+            if exist:
+                return jsonify({'error': 'El ID ya existe, prueba con otro'}), 400
+            
+            
             sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
             cursor.execute(sql, (data['id_product'], data['product'], data['price']))
             connection.commit()
@@ -255,7 +271,7 @@ def update_product(product_id):
         connection = get_db_connection()
         with connection.cursor() as cursor:
             # Verificar si el producto existe
-            cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
+            cursor.execute("SELECT id_product FROM products WHERE id_product = %s", (product_id,))
             if not cursor.fetchone():
                 return jsonify({'error': 'Producto no encontrado'}), 404
 
@@ -277,7 +293,7 @@ def update_product(product_id):
                 return jsonify({'error': 'No se enviaron campos para actualizar'}), 400
 
             values.append(product_id)
-            sql = f"UPDATE products SET {', '.join(fields)} WHERE id = %s"
+            sql = f"UPDATE products SET {', '.join(fields)} WHERE id_product = %s"
             cursor.execute(sql, values)
             connection.commit()
             
@@ -295,12 +311,12 @@ def delete_product(product_id):
         connection = get_db_connection()
         with connection.cursor() as cursor:
             # Verificar si el producto existe
-            cursor.execute("SELECT id FROM products WHERE id = %s", (product_id,))
+            cursor.execute("SELECT id_product FROM products WHERE id_product = %s", (product_id,))
             if not cursor.fetchone():
                 return jsonify({'error': 'Producto no encontrado'}), 404
 
             # Eliminar el producto
-            cursor.execute("DELETE FROM products WHERE id = %s", (product_id,))
+            cursor.execute("DELETE FROM products WHERE id_product = %s", (product_id,))
             connection.commit()
             
         connection.close()
@@ -316,7 +332,7 @@ def obtener_productos():
     try:
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            cursor.execute("SELECT id, product AS nombre, price AS precio FROM products")
+            cursor.execute("SELECT id_product AS id, product AS nombre, price AS precio FROM products")
             rows = cursor.fetchall()
             
         connection.close()
@@ -346,7 +362,7 @@ def home():
     try: 
         connection = get_db_connection()
         with connection.cursor() as cursor:
-            sql="SELECT id_product, product, price FROM products ORDER BY id DESC"
+            sql="SELECT id_product, product, price FROM products ORDER BY id_product DESC"
             cursor.execute(sql)
             products = cursor.fetchall()
         
@@ -397,6 +413,16 @@ def add_user():
             
             connection = get_db_connection()
             with connection.cursor() as cursor:
+                cursor.execute("SELECT id_user FROM user WHERE id_user = %s", (id_user,))
+                exist = cursor.fetchone()
+                if exist:
+                    connection.close()
+                    return render_template('add_user.html',
+                                   message = f'El ID {id_user} ya existe, intenta con otro.',
+                                   success=False)
+
+
+            with connection.cursor() as cursor:
                 sql = "INSERT INTO user (id_user, user_name) VALUES (%s,%s)"
                 cursor.execute(sql, (int(id_user), user_name))
                 connection.commit()
@@ -433,12 +459,22 @@ def add_product_web():
                                      message='Todos los campos son requeridos', 
                                      success=False)
             
-            # Insertar en base de datos
+            # Verificar si ya existe el id-product
             connection = get_db_connection()
             with connection.cursor() as cursor:
-                sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
-                cursor.execute(sql, (int(id_product), product, float(price)))
-                connection.commit()
+                cursor.execute("SELECT id_product FROM products WHERE id_product = %s", (id_product,))
+                exist = cursor.fetchone()
+                if exist:
+                    connection.close()
+                    return render_template('add_product.html',
+                                           message = f'El ID {id_product} ya existe, intenta con otro.',
+                                            success=False)
+                    
+                # Insertar en la base de datos 
+                with connection.cursor() as cursor:
+                    sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
+                    cursor.execute(sql, (int(id_product), product, float(price)))
+                    connection.commit()
                 
             connection.close()
             
