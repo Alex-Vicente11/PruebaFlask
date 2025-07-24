@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Carrito de Compras</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="text-center mb-4">Carrito de Compras</h1>
+        
+        {% if message %}
+            <div class="alert alert-{{ 'success' if success else 'danger' }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endif %}
+        
+        <div class="row">
+            <!-- Columna de Usuarios -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h4>Seleccionar Usuario</h4>
+                    </div>
+                    <div class="card-body">
+                        <form id="userForm">
+                            <div class="mb-3">
+                                <label for="selected_user" class="form-label">Usuario:</label>
+                                <select class="form-select" id="selected_user" name="selected_user" required>
+                                    <option value="">Selecciona un usuario</option>
+                                    {% for user in users %}
+                                        <option value="{{ user.id_user }}" 
+                                                {% if selected_user and selected_user == user.id_user %}selected{% endif %}>
+                                            {{ user.user_name }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <button type="button" class="btn btn-primary" onclick="loadUserCart()">Ver Carrito</button>
+                        </form>
+                        
+                        <!-- Mostrar carrito del usuario seleccionado -->
+                        {% if selected_user and cart_items %}
+                            <div class="mt-4">
+                                <h5>Carrito de {{ selected_user_name }}:</h5>
+                                <div class="list-group">
+                                    {% for item in cart_items %}
+                                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                                            <div>
+                                                <strong>{{ item.product }}</strong><br>
+                                                <small>Cantidad: {{ item.quantity }}</small>
+                                            </div>
+                                            <div>
+                                                <span class="badge bg-primary rounded-pill">${{ "%.2f"|format(item.price * item.quantity) }}</span>
+                                                <form method="POST" action="/remove-from-cart" class="d-inline">
+                                                    <input type="hidden" name="cart_id" value="{{ item.id_cart }}">
+                                                    <input type="hidden" name="user_id" value="{{ selected_user }}">
+                                                    <button type="submit" class="btn btn-sm btn-danger ms-2">×</button>
+                                                </form>
+                                            </div>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                                <div class="mt-3">
+                                    <strong>Total: ${{ "%.2f"|format(cart_total) }}</strong>
+                                </div>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Columna de Productos -->
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h4>Lista de Productos</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Producto</th>
+                                        <th>Precio</th>
+                                        <th>Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for product in products %}
+                                        <tr>
+                                            <td>{{ product.id_product }}</td>
+                                            <td>{{ product.product }}</td>
+                                            <td>${{ "%.2f"|format(product.price) }}</td>
+                                            <td>
+                                                <form method="POST" action="/add-to-cart" class="d-inline">
+                                                    <input type="hidden" name="product_id" value="{{ product.id_product }}">
+                                                    <input type="hidden" name="user_id" id="hidden_user_{{ product.id_product }}">
+                                                    <div class="input-group input-group-sm" style="width: 150px;">
+                                                        <input type="number" name="quantity" class="form-control" value="1" min="1" max="99">
+                                                        <button type="submit" class="btn btn-success btn-sm" onclick="setUserId({{ product.id_product }})">
+                                                            Agregar
+                                                        </button>
+                                                    </div>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12 text-center">
+                <a href="/home" class="btn btn-secondary">Volver al Inicio</a>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.6/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function setUserId(productId) {
+            const selectedUser = document.getElementById('selected_user').value;
+            if (!selectedUser) {
+                alert('Por favor selecciona un usuario primero');
+                return false;
+            }
+            document.getElementById('hidden_user_' + productId).value = selectedUser;
+            return true;
+        }
+        
+        function loadUserCart() {
+            const selectedUser = document.getElementById('selected_user').value;
+            if (selectedUser) {
+                window.location.href = '/cart?user_id=' + selectedUser;
+            } else {
+                alert('Por favor selecciona un usuario');
+            }
+        }
+    </script>
+</body>
+</html>

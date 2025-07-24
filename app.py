@@ -368,8 +368,11 @@ def home():
             <div class="col-md-6 offset-md-3">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2>Lista de productos</h2>
-                    <a href="/add-product" class="btn btn-success">+ Agregar Producto</a>
-                    <a href="/add-user" class="btn btn-success">+ Agregar usuario</a>
+                    <div>
+                        <a href="/add-product" class="btn btn-success">+ Agregar Producto</a>
+                        <a href="/add-user" class="btn btn-success">+ Agregar usuario</a>
+                        <a href="/cart" class="btn btn-primary">🛒 Carrito</a>
+                    </div>
                 </div>
                 <ul class="list-group">
                     {result}
@@ -544,13 +547,127 @@ def query_string():  #se considera una vista?
  #   return redirect(url_for('index'))  #aqui se redirije a la ventana (vista) de index en caso de error
 #url_for indica a la url asociada a la vista(index)
 
+# Vista del carrito de compras
+@app.route('/cart')
+def cart_view():
+    try:
+        user_id = request.args.get('user_id')
+        
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Obtener todos los usuarios
+            cursor.execute("SELECT id_user, user_name FROM user ORDER BY user_name")
+            users = cursor.fetchall()
+            
+            # Obtener todos los productos
+            cursor.execute("SELECT id_product, product, price FROM products ORDER BY product")
+            products = cursor.fetchall()
+            
+            cart_items = []
+            cart_total = 0
+            selected_user_name = None
+            
+            if user_id:
+                # Obtener nombre del usuario seleccionado
+                cursor.execute("SELECT user_name FROM user WHERE id_user = %s", (user_id,))
+                user_result = cursor.fetchone()
+                if user_result:
+                    selected_user_name = user_result['user_name']
+                
+                # Obtener items del carrito para el usuario seleccionado
+                cursor.execute("""
+                    SELECT c.id_cart, c.quantity, p.product, p.price 
+                    FROM cart c 
+                    JOIN products p ON c.id_product = p.id_product 
+                    WHERE c.id_user = %s
+                    ORDER BY c.added_date DESC
+                """, (user_id,))
+                cart_items = cursor.fetchall()
+                
+                # Calcular total
+                cart_total = sum(item['price'] * item['quantity'] for item in cart_items)
+        
+        connection.close()
+        
+        return render_template('cart_view.html', 
+                             users=users, 
+                             products=products,
+                             cart_items=cart_items,
+                             cart_total=cart_total,
+                             selected_user=int(user_id) if user_id else None,
+                             selected_user_name=selected_user_name)
+    
+    except Exception as e:
+        return render_template('cart_view.html', 
+                             users=[], 
+                             products=[],
+                             cart_items=[],
+                             cart_total=0,
+                             message=f'Error: {str(e)}',
+                             success=False)
+
+# Agregar producto al carrito
+@app.route('/add-to-cart', methods=['POST'])
+def add_to_cart():
+    try:
+        user_id = request.form.get('user_id')
+        product_id = request.form.get('product_id')
+        quantity = int(request.form.get('quantity', 1))
+        
+        if not user_id or not product_id:
+            return redirect(f'/cart?user_id={user_id}')
+        
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            # Verificar si el producto ya está en el carrito del usuario
+            cursor.execute("SELECT id_cart, quantity FROM cart WHERE id_user = %s AND id_product = %s", 
+                          (user_id, product_id))
+            existing_item = cursor.fetchone()
+            
+            if existing_item:
+                # Actualizar cantidad si ya existe
+                new_quantity = existing_item['quantity'] + quantity
+                cursor.execute("UPDATE cart SET quantity = %s WHERE id_cart = %s", 
+                              (new_quantity, existing_item['id_cart']))
+            else:
+                # Agregar nuevo item
+                cursor.execute("INSERT INTO cart (id_user, id_product, quantity) VALUES (%s, %s, %s)",
+                              (user_id, product_id, quantity))
+            
+            connection.commit()
+        
+        connection.close()
+        
+        return redirect(f'/cart?user_id={user_id}')
+    
+    except Exception as e:
+        return redirect(f'/cart?user_id={user_id or ""}')
+
+# Remover producto del carrito
+@app.route('/remove-from-cart', methods=['POST'])
+def remove_from_cart():
+    try:
+        cart_id = request.form.get('cart_id')
+        user_id = request.form.get('user_id')
+        
+        connection = get_db_connection()
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM cart WHERE id_cart = %s", (cart_id,))
+            connection.commit()
+        
+        connection.close()
+        
+        return redirect(f'/cart?user_id={user_id}')
+    
+    except Exception as e:
+        return redirect(f'/cart?user_id={user_id or ""}')
+
 
 if __name__=='__main__': #se comprueba la aplicacion
     app.add_url_rule('/query_string',view_func=query_string) #aqui se enlaza la funcion a la url
 #   app.register_error_handler(404, pagina_no_encontrada)    #se registra el manejador de error que apunte a la funcion pag_no_encontrada
-    app.run(debug=True, port=5001)  #aqui se corre el programa
+    app.run(debug=True, port=5002)  #aqui se corre el programa
 
 #observar el estado de Debug mode: ctrl + c detengo el servidor
 #activar el modo depuracion, dentro de run(debug=true), aquí puedo determinar el puerto para la ejecucion
 #plantilla: documento html que tiene contenido que es devuelto a traves del servidor 
-
