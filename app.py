@@ -147,40 +147,37 @@ def get_user(id_user):
         return jsonify({'error': str(e)}), 500
 
 
-# CRUD para usuario
-# GET /users - Obtener todos los usuarios
-#GET /users/<id> - Obtener un usuario por ID
-
 # POST /users - crear un nuevo usuario
 @app.route('/users', methods=['POST'])
 def create_user():
-    try:
+    try: 
         data = request.get_json()
 
-        if not data or 'user_name' not in data:
-            return jsonify({'error': 'Faltan campos requeridos: user_name'}), 400
+        if not data or 'user_name' not in data or not data['user_name'].strip():
+            return jsonify({'error': 'Campo requerido: user_name no puede estar vacío'}), 400
+        
+        # Obtener el siguiente ID disponible (ya que no tienes AUTO_INCREMENT)
+        max_id = User.select(fn.COALESCE(fn.MAX(User.id_user), 0).alias('max_id')).scalar()
+        new_id = max_id + 1
 
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            # Obtener el siguiente ID disponible
-            cursor.execute("SELECT COALESCE(MAX(id_user), 0) + 1 FROM user")
-            id_user = cursor.fetchone()['COALESCE(MAX(id_user), 0) + 1']
-
-            sql = "INSERT INTO user (id_user, user_name) VALUES (%s, %s)" 
-            cursor.execute(sql, (id_user, data['user_name']))
-            connection.commit()
-            new_id = cursor.lastrowid
-
-        connection.close()
+        # Crear usuario con Peewee
+        user = User.create(id_user=new_id, user_name=data['user_name'].strip())
 
         return jsonify({
             'message': 'Usuario creado exitosamente',
-            'id': new_id 
+            'id': user.id_user,
+            'user_name': user.user_name 
         }), 201
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
+
+
+
+# CRUD para usuario
+# GET /users - Obtener todos los usuarios
+#GET /users/<id> - Obtener un usuario por ID
+
 
 # PUT /users/<id> - actualizar usuario
 @app.route('/users/<int:id_user>', methods=['PUT'])
