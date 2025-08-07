@@ -1,5 +1,9 @@
 from flask import Flask, render_template, request, url_for, redirect, jsonify
 import pymysql
+
+from peewee import *
+from datetime import datetime
+import os
 def get_html_base (body):
 
      return """<!DOCTYPE html>
@@ -18,11 +22,20 @@ def get_html_base (body):
 
 app = Flask(__name__) 
 
+db = MySQLDatabase(
+    'list_products',
+    user='root',
+    password='Relic11&',
+    host='localhost',
+    port=3306
+)
+
 # Configuración MySQL
 def get_db_connection():
     return pymysql.connect(
         host='localhost',
         user='root',
+        passwd='Relic11&',
         database='list_products',
         cursorclass=pymysql.cursors.DictCursor
     )
@@ -233,7 +246,7 @@ def create_product():
         with connection.cursor() as cursor:
             # Obtener el siguiente ID disponible
             cursor.execute("SELECT COALESCE(MAX(id_product), 0) + 1 FROM products")
-            id_product = cursor.fetchone()['COALESCE(MAX(id_product), 0) + 1']
+            id_product = cursor.fetchone()['COALESCE(MAX(id_product), 0) + 1']  #qua pasa si múltiples usuarios al mismo tiempo?
             
             sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
             cursor.execute(sql, (id_product, data['product'], data['price']))
@@ -244,7 +257,7 @@ def create_product():
         
         return jsonify({
             'message': 'Producto creado exitosamente',
-            'id': new_id
+            'id': new_id  #mejor retornar id_product directamente
         }), 201
 
     except Exception as e:
@@ -397,7 +410,7 @@ def add_user():
     
     elif request.method == 'POST':
         try: 
-            user_name = request.form.get('user_name')
+            user_name = request.form.get('user_name') 
 
             if not user_name:
                 return render_template('add_user.html',
@@ -551,7 +564,7 @@ def query_string():  #se considera una vista?
 @app.route('/cart')
 def cart_view():
     try:
-        user_id = request.args.get('user_id')
+        user_id = request.args.get('user_id') #user_id solo coincide en /users
         
         connection = get_db_connection()
         with connection.cursor() as cursor:
