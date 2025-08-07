@@ -164,7 +164,7 @@ def create_user():
         user = User.create(id_user=new_id, user_name=data['user_name'].strip())
 
         return jsonify({
-            'message': 'Usuario creado exitosamente',
+            'message': 'Usuario creadp exitosamente',
             'id': user.id_user,
             'user_name': user.user_name 
         }), 201
@@ -173,54 +173,45 @@ def create_user():
         return jsonify({'error': str(e)}), 500
 
 
-
-# CRUD para usuario
-# GET /users - Obtener todos los usuarios
-#GET /users/<id> - Obtener un usuario por ID
-
-
 # PUT /users/<id> - actualizar usuario
 @app.route('/users/<int:id_user>', methods=['PUT'])
 def update_user(id_user):
-    try:
+    try: 
         data = request.get_json()
 
         if not data: 
-            return jsonify({'error': 'No se enviaron datos' }), 400
+            return jsonify({'error': 'No se enviaron datos'}), 400
         
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_user FROM user WHERE id_user = %s", (id_user,))
-            if not cursor.fetchone():
-                return jsonify({'error': 'Usuario no encontrado'}), 404
-            
-            fields = []
-            values = []
+        # Verificar si el usuario existe
+        user = User.get_or_none(User.id_user == id_user)
+        if not user:
+            return jsonify({'error': 'Usuario no encontrado'}), 404
+        
+        # Validar y actualizar campos
+        updated = False
 
-            if 'id_user' in data:
-                fields.append("id_user = %s")
-                #values.append("id_user", data['id_user'])
-                values.append(data['id_user'])
-            if 'user_name' in data:
-                fields.append("user_name = %s")
-                #values.append("user_name", data['user_name'])
-                values.append(data['user_name'])
+        if 'user_name' in data and data['user_name'].strip():
+            user.user_name = data['user_name'].strip()
+            updated = True
 
-            if not fields:
-                return jsonify({'error': 'No se enviaron datos para actualizar'}), 400
-            
-            values.append(id_user)
-            sql = f"UPDATE user SET {','.join(fields)} WHERE id_user = %s"
-            cursor.execute(sql,values)
-            connection.commit()
-
-        connection.close()
-
+        if not updated:
+            return jsonify({'error': 'No se enviaron datos válidos para actualizar'}), 400
+        
+        user.save()
         return jsonify({'message': 'Usuario actualizado exitosamente'}), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
+
+ 
+
+
+# CRUD para usuario
+# GET /users - Obtener todos los usuarios
+#GET /users/<id> - Obtener un usuario por ID
+# POST /users - crear un nuevo usuario
+# PUT /users/<id> - actualizar usuario
+
 
 # DELETE /users/<id> - Eliminar usuario
 @app.route('/users/<int:id_user>', methods=['DELETE'])
