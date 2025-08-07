@@ -291,41 +291,31 @@ def update_product(product_id):
         if not data:
             return jsonify({'error': 'No se enviaron datos'}), 400
 
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            # Verificar si el producto existe
-            cursor.execute("SELECT id_product FROM products WHERE id_product = %s", (product_id,))
-            if not cursor.fetchone():
-                return jsonify({'error': 'Producto no encontrado'}), 404
-
-            # Construir query dinámicamente según campos enviados
-            fields = []
-            values = []
-            
-            if 'id_product' in data:
-                fields.append("id_product = %s")
-                values.append(data['id_product'])
-            if 'product' in data:
-                fields.append("product = %s")
-                values.append(data['product'])
-            if 'price' in data:
-                fields.append("price = %s")
-                values.append(data['price'])
-            
-            if not fields:
-                return jsonify({'error': 'No se enviaron campos para actualizar'}), 400
-
-            values.append(product_id)
-            sql = f"UPDATE products SET {', '.join(fields)} WHERE id_product = %s"
-            cursor.execute(sql, values)
-            connection.commit()
-            
-        connection.close()
+        # Verificar si el producto existe
+        product = Product.get_or_none(Product.id_product == product_id)
+        if not product:
+            return jsonify({'error': 'Producto no encontrado'}), 404
         
+        # Validar y borrar campos
+        updated = False
+
+        if 'product' in data and data['product'].strip():
+            product.product = data['product'].strip()
+            updated = True
+        
+        if 'price' in data and isinstance(data['price'], (int, float)) and data['price']:
+            product.price = data['price']
+            updated = True
+
+        if not updated:
+            return jsonify({'error': 'No se enviaron datos validos para actualizar'}), 400
+        
+        product.save()
         return jsonify({'message': 'Producto actualizado exitosamente'}), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 # DELETE /products/<id> - Eliminar un producto
 @app.route('/products/<int:product_id>', methods=['DELETE'])
