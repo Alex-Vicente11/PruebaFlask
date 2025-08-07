@@ -106,22 +106,35 @@ class Cart(BaseModel):
                 'subtotal': float(self.id_product.price * self.quantity)
             }
 
-# CRUD para usuario
+
+# Conexion automatica a la BD
+@app.before_request
+def before_request():
+    if db.is_closed():
+        db.connect()
+
+@app.teardown_request
+def teardown_request(exception):
+    if not db.is_closed():
+        db.close()
+
+
+# CRUD para usuario (peewee)
 # GET /users - Obtener todos los usuarios
 @app.route('/users', methods=['GET'])
 def get_users():
     try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_user, user_name FROM user")
-            users = cursor.fetchall()
-
-        connection.close()
-        return jsonify(users), 200
+        users = User.select()
+        users_list = [{'id_user': user.id_user, 'user_name': user.user_name} for user in users]
+        return jsonify(users_list), 200
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
+
+
+# CRUD para usuario
+# GET /users - Obtener todos los usuarios
+
 
 #GET /users/<id> - Obtener un usuario por ID
 @app.route('/users/<int:id_user>', methods=['GET'])
