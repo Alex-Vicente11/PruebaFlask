@@ -231,15 +231,6 @@ def obtener_usuarios():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# CRUD para usuario
-# GET /users - Obtener todos los usuarios
-#GET /users/<id> - Obtener un usuario por ID
-# POST /users - crear un nuevo usuario
-# PUT /users/<id> - actualizar usuario
-# DELETE /users/<id> - Eliminar usuario
-#EndPoint (mantener compatibilidad)
-
-
 
 # CRUD REST Endpoints para productos
 # GET /products - Obtener todos los productos
@@ -445,7 +436,7 @@ def home():
 def prueba():
     return render_template('carrito.html')
 
-# vista web de usuario
+# vista web de usuario (peewee)
 @app.route('/add-user', methods=['GET','POST'])
 def add_user():
     if request.method == 'GET':
@@ -453,24 +444,19 @@ def add_user():
     
     elif request.method == 'POST':
         try: 
-            user_name = request.form.get('user_name') 
+            user_name = request.form.get('user_name', '').strip() 
 
             if not user_name:
                 return render_template('add_user.html',
                                        message='Rellenar todos los campos',
                                        success=False)
             
-            connection = get_db_connection()
-            with connection.cursor() as cursor:
-                # Obtener el siguiente ID disponible
-                cursor.execute("SELECT COALESCE(MAX(id_user), 0) + 1 FROM user")
-                id_user = cursor.fetchone()['COALESCE(MAX(id_user), 0) + 1']
+            # Obtener el sigueinte ID disponible (sin usar AUTO_INCREMENT)
+            max_id = User.select(fn.COALESCE(fn.MAX(User.id_user), 0).alias('max_id')).scalar()
+            new_id = max_id + 1
 
-                sql = "INSERT INTO user (id_user, user_name) VALUES (%s,%s)"
-                cursor.execute(sql, (id_user, user_name))
-                connection.commit()
-
-            connection.close()
+            # Crear usuario con Peewee
+            user = User.create(id_user=new_id, user_name=user_name)
 
             return render_template('add_user.html',
                                    message=f'Usuario "{user_name}" agregado exitosamente',
