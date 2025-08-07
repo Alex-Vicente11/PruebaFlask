@@ -22,6 +22,7 @@ def get_html_base (body):
 
 app = Flask(__name__) 
 
+# Configuracion de la DB con Peewee
 db = MySQLDatabase(
     'list_products',
     user='root',
@@ -40,6 +41,70 @@ def get_db_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
+
+# Modelo base
+class BaseModel(Model):
+    class Meta: 
+        database = db
+
+
+# MODELOS PEEWEE (conversion de mysql a peewee)
+
+# Modelo usuario
+class User(BaseModel):
+    id_user = IntegerField(primary_key=True)
+    user_name = CharField(max_length=100, null=False)
+
+    class Meta:
+        table_name = 'user'
+
+    def to_dict(self):
+        # convierte el objeto a diccionario para JSON
+        return {
+            'id_user': self.id_user,
+            'user_name': self.user_name
+        }
+    
+
+#Model producto
+class Product(BaseModel):
+    id_product = IntegerField(primary_key=True)
+    product = CharField(max_length=100, null=False)
+    price = DecimalField(decimal_places=2, null=False)
+
+    class Meta:
+        table_name = 'products'
+
+    def to_dict(self):
+        return {
+            'id_product': self.id_product,
+            'product': self.product,
+            'price': float(self.price)
+        }
+
+
+# Modelo carrito
+class Cart(BaseModel):
+    id_cart = AutoField(primary_key=True)
+    id_user = ForeignKeyField(User, column_name='id_user', backref='cart_items')
+    id_product = ForeignKeyField(Product, column_name='id_product', backref='in_carts')
+    quantity = IntegerField(default=1)
+    added_date = DateTimeField(default=datetime.now)
+
+    class Meta:
+        table_name = 'cart'
+
+        def to_dict(self):
+            return {
+                'id_cart': self.id_cart,
+                'id_user': self.id_user.id_user,
+                'id_product': self.id_product.id_product,
+                'quantity': self.quantity,
+                'added_date': self.added_date.isoformat() if self.added_date else None,
+                'product_name': self.id_product.product,
+                'product_price': float(self.id_product.price),
+                'subtotal': float(self.id_product.price * self.quantity)
+            }
 
 # CRUD para usuario
 # GET /users - Obtener todos los usuarios
