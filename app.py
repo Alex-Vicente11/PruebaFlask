@@ -232,18 +232,14 @@ def obtener_usuarios():
         return jsonify({'error': str(e)}), 500
 
 
-# CRUD REST Endpoints para productos
+# CRUD REST Endpoints para productos (peewee)
 # GET /products - Obtener todos los productos
 @app.route('/products', methods=['GET'])
 def get_products():
     try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_product, product, price FROM products")
-            productos = cursor.fetchall()
-            
-        connection.close()
-        return jsonify(productos), 200
+        productos = Product.select()
+        products_list = [{'id_product': products.id_product, 'product': products.product, 'price': products.price} for products in productos]
+        return jsonify(products_list), 200
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
