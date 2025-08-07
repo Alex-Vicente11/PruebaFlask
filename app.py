@@ -321,19 +321,16 @@ def update_product(product_id):
 @app.route('/products/<int:product_id>', methods=['DELETE'])
 def delete_product(product_id):
     try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            # Verificar si el producto existe
-            cursor.execute("SELECT id_product FROM products WHERE id_product = %s", (product_id,))
-            if not cursor.fetchone():
+        product = Product.get_or_none(Product.id_product == product_id)
+
+        if not product:
                 return jsonify({'error': 'Producto no encontrado'}), 404
 
-            # Eliminar el producto
-            cursor.execute("DELETE FROM products WHERE id_product = %s", (product_id,))
-            connection.commit()
-            
-        connection.close()
-        
+        # Se elimina primero los registros relacionados en el carrito
+        Cart.delete().where(Cart.id_product == product_id).execute()
+
+        # Eliminar el producto
+        product.delete_instance()
         return jsonify({'message': 'Producto eliminado exitosamente'}), 200
 
     except Exception as e:
