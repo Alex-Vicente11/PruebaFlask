@@ -204,7 +204,20 @@ def update_user(id_user):
         return jsonify({'error': str(e)}), 500
 
  
+# DELETE /users/<id> - Eliminar usuario
+@app.route('/users/<int:id_user>', methods=['DELETE'])
+def delete_user(id_user):
+    try:
+        user = User.get_or_none(User.id_user == id_user)
 
+        if not user:
+            return jsonify({'error': 'El usuario no existe'}), 404
+        
+        user.delete_instance()
+        return jsonify({'message': 'Usuario eliminado exitosamente'}), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # CRUD para usuario
 # GET /users - Obtener todos los usuarios
@@ -214,25 +227,7 @@ def update_user(id_user):
 
 
 # DELETE /users/<id> - Eliminar usuario
-@app.route('/users/<int:id_user>', methods=['DELETE'])
-def delete_user(id_user):
-    try: 
-        connection = get_db_connection()
 
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_user FROM user WHERE id_user=%s", (id_user,))
-            if not cursor.fetchone():
-                return jsonify({'error': 'El usuario no existe'}), 404
-            
-            cursor.execute("DELETE FROM user WHERE id_user=%s", (id_user,))
-            connection.commit()
-
-        connection.close()
-
-        return jsonify({'message': 'Usuario eliminado exitosamente'}), 200
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
     
 
 #EndPoint (mantener compatibilidad)
