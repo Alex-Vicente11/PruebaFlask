@@ -132,29 +132,25 @@ def get_users():
         return jsonify({'error': str(e)}), 500
 
 
-# CRUD para usuario
-# GET /users - Obtener todos los usuarios
-
-
-#GET /users/<id> - Obtener un usuario por ID
+# GET /users/<id> - Obtener un usuario por ID
 @app.route('/users/<int:id_user>', methods=['GET'])
 def get_user(id_user):
-    try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_user, user_name FROM user WHERE id_user = %s", (id_user,))
-            user = cursor.fetchone()
-        
-        connection.close()
+    try: 
+        user = User.get_or_none(User.id_user == id_user)
 
         if user:
-            return jsonify(user), 200
-        else: 
-            return jsonify({'Error': 'usuario no encontrado'}),404
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}),500
+            return jsonify({'id_user': user.id_user, 'user_name': user.user_name}), 200
+        else:
+            return jsonify({'error': 'Usuario no encontrado'}), 404
     
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# CRUD para usuario
+# GET /users - Obtener todos los usuarios
+#GET /users/<id> - Obtener un usuario por ID
+
 # POST /users - crear un nuevo usuario
 @app.route('/users', methods=['POST'])
 def create_user():
