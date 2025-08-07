@@ -264,25 +264,19 @@ def create_product():
     try:
         data = request.get_json()
         
-        if not data or 'product' not in data or 'price' not in data:
+        if not data or 'product' not in data or not data['product'].strip() or not 'price' not in data or not data['price'].strip():
             return jsonify({'error': 'Faltan campos requeridos: product, price'}), 400
 
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            # Obtener el siguiente ID disponible
-            cursor.execute("SELECT COALESCE(MAX(id_product), 0) + 1 FROM products")
-            id_product = cursor.fetchone()['COALESCE(MAX(id_product), 0) + 1']  #qua pasa si múltiples usuarios al mismo tiempo?
-            
-            sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
-            cursor.execute(sql, (id_product, data['product'], data['price']))
-            connection.commit()
-            new_id = cursor.lastrowid
-            
-        connection.close()
+        # Obtener el siguiente ID
+        max_id = Product.select(fn.COALESCE(fn.MAX(Product.id_product), 0).alias('max_id')).scalar()
+        new_id = max_id + 1
+
+        # Crear nuevo producto con peewee
+        producto = Product.create(id_product=new_id, product=data['product'].strip())
         
         return jsonify({
             'message': 'Producto creado exitosamente',
-            'id': new_id  #mejor retornar id_product directamente
+            'id': producto.id_prodcut, 
         }), 201
 
     except Exception as e:
