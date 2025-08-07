@@ -219,39 +219,25 @@ def delete_user(id_user):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+# EndPoint (mantener compatibilidad)
+@app.route('/usuarios')
+def obtener_usuarios():
+    try: 
+        users = User.select()
+        usuarios = [{'id': user.id_user, 'nombre': user.user_name} for user in users]
+        return jsonify(usuarios)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # CRUD para usuario
 # GET /users - Obtener todos los usuarios
 #GET /users/<id> - Obtener un usuario por ID
 # POST /users - crear un nuevo usuario
 # PUT /users/<id> - actualizar usuario
-
-
 # DELETE /users/<id> - Eliminar usuario
-
-    
-
 #EndPoint (mantener compatibilidad)
-@app.route('/usuarios')
-def obtener_usuarios():
-    try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_user AS id, user_name AS nombre FROM user")
-            rows = cursor.fetchall()
-
-        connection.close()
-
-        usuarios = []
-        for row in rows:
-            usuarios.append({
-                'id': row['id'],
-                'nombre': row['nombre']
-            })
-
-        return jsonify(usuarios)
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 
