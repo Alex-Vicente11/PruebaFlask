@@ -248,15 +248,10 @@ def get_products():
 @app.route('/products/<int:product_id>', methods=['GET'])
 def get_product(product_id):
     try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_product, product, price FROM products WHERE id = %s", (product_id,))
-            producto = cursor.fetchone()
-            
-        connection.close()
+        product = Product.get_or_none(Product.id_product == product_id)
         
-        if producto:
-            return jsonify(producto), 200
+        if product:
+            return jsonify({'id_product': product.id_product, 'product': product.product, 'price': product.price}), 200
         else:
             return jsonify({'error': 'Producto no encontrado'}), 404
 
