@@ -365,17 +365,11 @@ def obtener_productos():
 @app.route('/home') 
 def home():
     try: 
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            sql="SELECT id_product, product, price FROM products ORDER BY id_product DESC"
-            cursor.execute(sql)
-            products = cursor.fetchall()
-        
-        connection.close()
+        products = Product.select().order_by(Product.id_product.desc())
 
         result = ""
         for x in products:
-            result += f"<li class='list-group-item list-group-item-action'>ID: {x['id_product']} - Producto: {x['product']} - Precio: {x['price']}</li>"
+            result += f"<li class='list-group-item list-group-item-action'>ID: {x.id_product} - Producto: {x.product} - Precio: {x.price}</li>"
 
         html_content = f"""
         <div class="row">
