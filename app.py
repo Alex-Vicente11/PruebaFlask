@@ -340,20 +340,15 @@ def delete_product(product_id):
 @app.route('/productos')
 def obtener_productos():
     try:
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT id_product AS id, product AS nombre, price AS precio FROM products")
-            rows = cursor.fetchall()
-            
-        connection.close()
-        
+        products = Product.select()
+
         # Convertir a formato compatible
         productos = []
-        for row in rows:
+        for row in products:
             productos.append({
-                'id': row['id'],
-                'nombre': row['nombre'],
-                'precio': float(row['precio'])
+                'id': row.id_product,
+                'nombre': row.product,
+                'precio': float(row.price)
             })
 
         return jsonify(productos)
