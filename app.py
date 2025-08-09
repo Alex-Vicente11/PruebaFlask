@@ -585,27 +585,21 @@ def add_to_cart():
         if not user_id or not product_id:
             return redirect(f'/cart?user_id={user_id}')
         
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            # Verificar si el producto ya está en el carrito del usuario
-            cursor.execute("SELECT id_cart, quantity FROM cart WHERE id_user = %s AND id_product = %s", 
-                          (user_id, product_id))
-            existing_item = cursor.fetchone()
-            
-            if existing_item:
-                # Actualizar cantidad si ya existe
-                new_quantity = existing_item['quantity'] + quantity
-                cursor.execute("UPDATE cart SET quantity = %s WHERE id_cart = %s", 
-                              (new_quantity, existing_item['id_cart']))
-            else:
-                # Agregar nuevo item
-                cursor.execute("INSERT INTO cart (id_user, id_product, quantity) VALUES (%s, %s, %s)",
-                              (user_id, product_id, quantity))
-            
-            connection.commit()
+        # Buscar si el producto ya existe en el carrito del usuario 
+        carrito = Cart.get_or_none((Cart.id_cart == user_id) == (Cart.quantity == quantity))
+
+        if carrito:
+            # Actualizar cantidad si ya existe
+            carrito.quantity += quantity
+            carrito.save()
         
-        connection.close()
-        
+        else:
+            # Agregar nuevo item
+            carrito = Cart.create(
+                id_user = user_id,
+                id_product = product_id, 
+                quantity = quantity)
+
         return redirect(f'/cart?user_id={user_id}')
     
     except Exception as e:
