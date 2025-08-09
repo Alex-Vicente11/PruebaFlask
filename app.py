@@ -439,8 +439,8 @@ def add_product_web():
     elif request.method == 'POST':
         try:
             # Obtener datos del formulario
-            product = request.form.get('product')
-            price = request.form.get('price')
+            product = request.form.get('product', '').strip()
+            price = request.form.get('price', '').strip()
             
             # Validar campos requeridos
             if not product or not price:
@@ -448,43 +448,24 @@ def add_product_web():
                                      message='Todos los campos son requeridos', 
                                      success=False)
             
-            connection = get_db_connection()
-            with connection.cursor() as cursor:
-                # Obtener el siguiente ID disponible
-                cursor.execute("SELECT COALESCE(MAX(id_product), 0) + 1 FROM products")
-                id_product = cursor.fetchone()['COALESCE(MAX(id_product), 0) + 1']
-                    
-                # Insertar en la base de datos 
-                sql = "INSERT INTO products (id_product, product, price) VALUES (%s, %s, %s)"
-                cursor.execute(sql, (id_product, product, float(price)))
-                connection.commit()
-                
-            connection.close()
-            
+            # Obtener el ID disponible
+            max_id = Product.select(fn.COALESCE(fn.MAX(Product.id_product), 0).alias('max_id')).scalar()
+            new_id = max_id + 1
+
+            product = Product.create(
+                id_product = new_id, 
+                product = product, 
+                price = price
+                )
+
             return render_template('add_product.html', 
-                                 message=f'Producto "{product}" agregado exitosamente', 
+                                 message=f'Producto "{product.product}" agregado exitosamente', 
                                  success=True)
             
         except Exception as e:
             return render_template('add_product.html', 
                                  message=f'Error al agregar producto: {str(e)}', #aqui condicionar
                                  success=False)
-
-#def index(): 
-#    products = [
-#        {"name": "Alice", "id": 30, "brand": "Nueva York"},
-#        {"name": "Bob", "id": 25, "brand": "Los Ángeles"},
-#        {"name": "Charlie", "id": 35, "brand": "Chicago"}
-#    ]
-#    result = ""
-#    for x in products:
-#        result += f"<li>{x['name']}</li>"
-#    return get_html_base("""                    
-#    <ul>
-#        {result}
-#    </ul>
-#    """.format(result=result))
-# return get_html_base(f'<button type="{btn_name}" class="btn btn-primary">Haz clic</button>')
 
 
 @app.route('/product')
