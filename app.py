@@ -586,7 +586,7 @@ def add_to_cart():
             return redirect(f'/cart?user_id={user_id}')
         
         # Buscar si el producto ya existe en el carrito del usuario 
-        carrito = Cart.get_or_none((Cart.id_cart == user_id) == (Cart.quantity == quantity))
+        carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == Cart.id_product == product_id))
 
         if carrito:
             # Actualizar cantidad si ya existe
