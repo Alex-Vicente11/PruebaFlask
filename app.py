@@ -611,14 +611,18 @@ def remove_from_cart():
     try:
         cart_id = request.form.get('cart_id')
         user_id = request.form.get('user_id')
+
+        # Validación de parámetros requeridos
+        if not cart_id: 
+            return redirect(f'/cart?user_id={user_id or ""}')
         
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM cart WHERE id_cart = %s", (cart_id,))
-            connection.commit()
-        
-        connection.close()
-        
+        # Buscar el producto en el carrito
+        remove_product = Cart.get_or_none(cart_id == Cart.id_cart)
+
+        # Verificar que existe antes de eliminar
+        if remove_product:
+            remove_product.delete_instance()
+
         return redirect(f'/cart?user_id={user_id}')
     
     except Exception as e:
