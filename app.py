@@ -507,16 +507,6 @@ def after_request(respose):  #se requiere para despues de la vista el parametro 
     print("Después de la petición")
     return respose
 
-@app.route('/contacto/<nombre>/<int:edad>') #url dinamica (decorador)
-def contacto(nombre, edad):
-    data= {
-        'titulo':'contacto',
-        'nombre':nombre,
-        'edad' :edad
-    }
-    return render_template('contacto.html', data=data)
-
-
 #query_string significa pasarle a una url un serie de parametros que puede ser variable
 def query_string():  #se considera una vista?
     print(request)   #es un objeto (sera lo que un cliente solicita a un servidor)
@@ -526,52 +516,46 @@ def query_string():  #se considera una vista?
     return "OK"      #necesariamente se debe retornar algo
 #en la pag web, ? indica que se pasan parametros (param1=jose)
 
-#def pagina_no_encontrada(error): #control de paginas con error 404
-    #return render_template('404.html'), 404  #404 es el codigo de error asociado a una pagina no encontrada
- #   return redirect(url_for('index'))  #aqui se redirije a la ventana (vista) de index en caso de error
-#url_for indica a la url asociada a la vista(index)
-
 # Vista del carrito de compras
 @app.route('/cart')
 def cart_view():
     try:
         user_id = request.args.get('user_id') #user_id solo coincide en /users
         
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            # Obtener todos los usuarios
-            cursor.execute("SELECT id_user, user_name FROM user ORDER BY user_name")
-            users = cursor.fetchall()
+        users = User.select().order_by(User.user_name)
+
+        products = Product.select().order_by(Product.product)
+
+        cart_items = []
+        cart_total = 0
+        selected_user_name = None
+
+        if user_id:
+            # Obtener el nombre del usuario seleccionado
+            user = (User.
+                   select()
+                   .where(User.id_user == user_id)
+                   .first())
+           
+            if user:
+                selected_user_name = user.user_name 
+
+            # Obtener items del carrito para el usuario seleccionado
+            cart_items = (Cart
+                          .select(Cart.id_cart,
+                                  Cart.quantity,
+                                  Product.product,
+                                  Product.price)
+                            .join(Product, on=(Cart.id_product == Product.id_product))
+                            .where(Cart.id_user == user_id)
+                            .order_by(Cart.added_date.desc())
+                            )
             
-            # Obtener todos los productos
-            cursor.execute("SELECT id_product, product, price FROM products ORDER BY product")
-            products = cursor.fetchall()
-            
-            cart_items = []
-            cart_total = 0
-            selected_user_name = None
-            
-            if user_id:
-                # Obtener nombre del usuario seleccionado
-                cursor.execute("SELECT user_name FROM user WHERE id_user = %s", (user_id,))
-                user_result = cursor.fetchone()
-                if user_result:
-                    selected_user_name = user_result['user_name']
-                
-                # Obtener items del carrito para el usuario seleccionado
-                cursor.execute("""
-                    SELECT c.id_cart, c.quantity, p.product, p.price 
-                    FROM cart c 
-                    JOIN products p ON c.id_product = p.id_product 
-                    WHERE c.id_user = %s
-                    ORDER BY c.added_date DESC
-                """, (user_id,))
-                cart_items = cursor.fetchall()
-                
-                # Calcular total
-                cart_total = sum(item['price'] * item['quantity'] for item in cart_items)
-        
-        connection.close()
+            cart_items = list(cart_items.dicts())
+            # Calcular total
+            cart_total = sum(item['price'] * item['quantity'] for item in cart_items)
+
+            # CORREGIR QUE AL SELECCIONAR USUARIO EL CARRITO CORRESPONDA CORRECTAMENTE
         
         return render_template('cart_view.html', 
                              users=users, 
