@@ -263,15 +263,30 @@ def get_product(product_id):
 def create_product():
     try:
         data = request.get_json()
+        print("Datos recibidos:", data)
         
-        if not data or 'product' not in data or not data['product'].strip() or not 'price' not in data or not data['price'] is None:
+        # Validacion de datos basicos
+        if not data:
+            return jsonify({'error': 'No se enviaron datos'}), 400
+        
+        if 'product' not in data or 'price' not in data:
             return jsonify({'error': 'Faltan campos requeridos: product, price'}), 400
+        
+        # Validación del producto
+        if not data['product'] or not data['product'].strip():
+            return jsonify({'error': 'El nombre del producto no puede estar vacío'}), 400
+        
+        # Validación del precio
+        if data['price'] is None: 
+            return jsonify({'error': 'El precio es requerido'}), 400
+        
+        print("Tipo de price:", type(data.get('price')))
 
         try:
             price = float(data['price'])
             if price <= 0:
                 return jsonify({'error': 'El precio debe ser mayor a 0'}), 400
-        except (ValueError. TypeError):
+        except (ValueError, TypeError):
             return jsonify({'error': 'El precio debe ser un número válido'}), 400
          
         # Obtener el siguiente ID
@@ -288,10 +303,13 @@ def create_product():
         return jsonify({
             'message': 'Producto creado exitosamente',
             'id': producto.id_product, 
+            'product': producto.product,
+            'price': producto.price
         }), 201
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error en create_product: {str(e)}")
+        return jsonify({'error': f'Error interno del servidor: {str(e)}'}), 500
 
 # PUT /products/<id> - Actualizar un producto
 @app.route('/products/<int:product_id>', methods=['PUT'])
