@@ -264,19 +264,30 @@ def create_product():
     try:
         data = request.get_json()
         
-        if not data or 'product' not in data or not data['product'].strip() or not 'price' not in data or not data['price'].strip():
+        if not data or 'product' not in data or not data['product'].strip() or not 'price' not in data or not data['price'] is None:
             return jsonify({'error': 'Faltan campos requeridos: product, price'}), 400
 
+        try:
+            price = float(data['price'])
+            if price <= 0:
+                return jsonify({'error': 'El precio debe ser mayor a 0'}), 400
+        except (ValueError. TypeError):
+            return jsonify({'error': 'El precio debe ser un número válido'}), 400
+         
         # Obtener el siguiente ID
         max_id = Product.select(fn.COALESCE(fn.MAX(Product.id_product), 0).alias('max_id')).scalar()
         new_id = max_id + 1
 
-        # Crear nuevo producto con peewee
-        producto = Product.create(id_product=new_id, product=data['product'].strip())
+        # Crear nuevo producto con precio incluido peewee
+        producto = Product.create(
+            id_product=new_id, 
+            product=data['product'].strip(),
+            price=price
+            )
         
         return jsonify({
             'message': 'Producto creado exitosamente',
-            'id': producto.id_prodcut, 
+            'id': producto.id_product, 
         }), 201
 
     except Exception as e:
