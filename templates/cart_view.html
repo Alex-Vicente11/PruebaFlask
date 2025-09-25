@@ -101,7 +101,7 @@
                                                     <input type="hidden" name="user_id" id="hidden_user_{{ product.id_product }}">
                                                     <div class="input-group input-group-sm" style="width: 150px;">
                                                         <input type="number" name="quantity" class="form-control" value="1" min="1" max="99">
-                                                        <button type="submit" class="btn btn-success btn-sm" onclick="setUserId({{ product.id_product }})">
+                                                        <button type="submit" class="btn btn-success btn-sm" onclick="return setUserId({{ product.id_product}})">
                                                             Agregar
                                                         </button>
                                                     </div>
@@ -128,18 +128,18 @@
     <script>
         function setUserId(productId) {
             const selectedUser = document.getElementById('selected_user').value;
-            if (!selectedUser) {
+            if (!selectedUser || selectedUser === '') {
                 alert('Por favor selecciona un usuario primero');
-                return false;
+                return false; // Previene el envio del formulario
             }
             document.getElementById('hidden_user_' + productId).value = selectedUser;
-            return true;
+            return true; // Permite el envio del formulario
         }
         
         function loadUserCart() {
             const selectedUser = document.getElementById('selected_user').value;
             if (selectedUser) {
-                window.location.href = '/cart?user_id=' + selectedUser;
+                window.location.href = '/cart-view?user_id=' + selectedUser;
             } else {
                 alert('Por favor selecciona un usuario');
             }

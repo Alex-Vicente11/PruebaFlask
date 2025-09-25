@@ -403,7 +403,7 @@ def home():
                     <div>
                         <a href="/add-product" class="btn btn-success">+ Agregar Producto</a>
                         <a href="/add-user" class="btn btn-success">+ Agregar usuario</a>
-                        <a href="/cart" class="btn btn-primary">🛒 Carrito</a>
+                        <a href="/cart-view" class="btn btn-primary">🛒 Carrito</a>
                     </div>
                 </div>
                 <ul class="list-group">
@@ -493,7 +493,7 @@ def add_product_web():
 
 
 # Vista del carrito de compras
-@app.route('/cart')
+@app.route('/cart-view')
 def cart_view():
     try:
         user_id = request.args.get('user_id') #user_id solo coincide en /users
@@ -550,36 +550,84 @@ def cart_view():
                              message=f'Error: {str(e)}',
                              success=False)
 
-# Agregar producto al carrito
+
+@app.route('/cart/<int:user_id>/<int:product_id>', methods=['GET'])
+def get_cart_item(user_id, product_id):
+    try:
+        carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == product_id))
+
+        if carrito:
+            return jsonify({
+                'idCart': carrito.id,
+                'idUser': carrito.id_user,
+                'idProduct': carrito.id_product,
+                'quantity': carrito.quantity
+            })
+        else: 
+            return jsonify(None), 404 # No existe en el carrito
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/add-to-cart', methods=['POST'])
 def add_to_cart():
     try:
-        user_id = request.form.get('user_id')
-        product_id = request.form.get('product_id')
-        quantity = int(request.form.get('quantity', 1))
+        # DETECCIÓN MEJORADA DEL TIPO DE REQUEST
+        data = request.get_json(silent=True)  # No genera error si no es JSON
         
-        if not user_id or not product_id:
-            return redirect(f'/cart?user_id={user_id}')
-        
-        # Buscar si el producto ya existe en el carrito del usuario 
-        carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == Cart.id_product == product_id))
+        if data is not None:
+            # Es una petición JSON (Android)
+            user_id = data.get('id_user')
+            product_id = data.get('id_product') 
+            quantity = int(data.get('quantity', 1))
+            is_json_request = True
+        else:
+            # Es una petición de formulario HTML
+            user_id = request.form.get('user_id')
+            product_id = request.form.get('product_id')
+            quantity = int(request.form.get('quantity', 1))
+            is_json_request = False
 
+        # Validación específica por tipo
+        if is_json_request:
+            if user_id is None or product_id is None:
+                return jsonify({'success': False, 
+                                'error': 'user_id y product_id requeridos'
+                                }), 400
+        else:
+            if not user_id or user_id == 'None' or not product_id or product_id == 'None':
+                return redirect(f'/cart-view?error=Debe seleccionar usuario y producto')
+
+        # Convertir y procesar
+        user_id = int(user_id)
+        product_id = int(product_id)
+        
+        # Buscar si el producto ya existe en el carrito del usuario
+        carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == product_id))
+        
         if carrito:
             # Actualizar cantidad si ya existe
             carrito.quantity += quantity
             carrito.save()
-        
         else:
             # Agregar nuevo item
-            carrito = Cart.create(
-                id_user = user_id,
-                id_product = product_id, 
-                quantity = quantity)
+            carrito = Cart.create(id_user=user_id, id_product=product_id, quantity=quantity)
 
-        return redirect(f'/cart?user_id={user_id}')
-    
+        if is_json_request:
+            return jsonify({'success': True, 
+                            'message': 'Agregado al carrito', 
+                            'cartItemId': carrito.id
+                            })
+        else:
+            return redirect(f'/cart-view?user_id={user_id}&success=true')
+
     except Exception as e:
-        return redirect(f'/cart?user_id={user_id or ""}')
+        if 'is_json_request' in locals() and is_json_request:
+            return jsonify({'success': False, 'error': str(e)}), 500
+        else:
+            return redirect(f'/cart-view?error={str(e)}')
+
 
 # Remover producto del carrito
 @app.route('/remove-from-cart', methods=['POST'])
@@ -606,5 +654,5 @@ def remove_from_cart():
 
 
 if __name__=='__main__': #se comprueba la aplicacion
-    app.run(debug=True, port=5002)  #aqui se corre el programa
+    app.run(debug=True, host='0.0.0.0' ,port=5002)  #aqui se corre el programa
 
