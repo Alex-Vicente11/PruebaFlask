@@ -94,17 +94,18 @@ class Cart(BaseModel):
     class Meta:
         table_name = 'cart'
 
-        def to_dict(self):
-            return {
-                'id_cart': self.id_cart,
-                'id_user': self.id_user.id_user,
-                'id_product': self.id_product.id_product,
-                'quantity': self.quantity,
-                'added_date': self.added_date.isoformat() if self.added_date else None,
-                'product_name': self.id_product.product,
-                'product_price': float(self.id_product.price),
-                'subtotal': float(self.id_product.price * self.quantity)
-            }
+
+def to_dict(self):
+    return {
+        'id_cart': self.id_cart,
+        'id_user': self.id_user.id_user,
+        'id_product': self.id_product.id_product,
+        'quantity': self.quantity,
+        'added_date': self.added_date.isoformat() if self.added_date else None,
+        'product_name': self.id_product.product,
+        'product_price': float(self.id_product.price),
+        'subtotal': float(self.id_product.price * self.quantity)
+    } 
 
 
 # Conexion automatica a la BD
@@ -551,6 +552,36 @@ def cart_view():
                              success=False)
 
 
+@app.route('/cart/user/<int:user_id>', methods=['GET'])
+def get_cart_items_by_user(user_id):
+    try:
+        # Obtener todos los items del carrito para el usuario
+        cart_items = Cart.select().where(Cart.id_user == user_id)
+
+        if not cart_items.exists():
+            return jsonify([]), 200 #carrito vacio
+        
+        # Respuesta con información del producto
+        result = []
+        for cart_item in cart_items:
+            product = Product.get_by_id(cart_item.id_product)
+        
+            result.append({
+                'product': {
+                    'id_product': product.id_product,
+                    'product': product.product,
+                    'price': float(product.price)
+                },
+                'quantity': cart_item.quantity,
+                'addedDate': cart_item.added_date.strftime('%Y-%m-%d %H:%M:%S')
+            })
+
+        return jsonify(result), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/cart/<int:user_id>/<int:product_id>', methods=['GET'])
 def get_cart_item(user_id, product_id):
     try:
@@ -558,11 +589,11 @@ def get_cart_item(user_id, product_id):
 
         if carrito:
             return jsonify({
-                'idCart': carrito.id,
-                'idUser': carrito.id_user,
-                'idProduct': carrito.id_product,
+                'id_cart': carrito.id_cart,
+                'id_user': carrito.id_user.id_user,
+                'id_product': carrito.id_product.id_product,
                 'quantity': carrito.quantity
-            })
+            }), 200
         else: 
             return jsonify(None), 404 # No existe en el carrito
         
@@ -627,6 +658,72 @@ def add_to_cart():
             return jsonify({'success': False, 'error': str(e)}), 500
         else:
             return redirect(f'/cart-view?error={str(e)}')
+
+
+@app.route('/cart/<int:cart_id>', methods=['PUT'])
+def update_cart_quantity(cart_id):
+    try:
+        data = request.get_json()
+        
+        if not data or 'quantity' not in data:
+            return jsonify({'success': False, 'error': 'Quantity requerida'}), 400
+        
+        quantity = int(data['quantity'])
+
+        if quantity < 0:
+            return jsonify({'success': False, 'error': 'Cantidad no puede ser negativa'}), 400
+        
+        cart_item = Cart.get_or_none(Cart.id_cart == cart_id)
+
+        if not cart_item:
+            return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
+        
+        if quantity == 0:
+            # Eliminar si cantidad es 0
+            cart_item.delete_instance()
+            return jsonify({
+                'success': True,
+                'message': 'Item eliminado del carrito'
+            }), 200
+        else: 
+            # Actualizar cantidad
+            cart_item.quantity = quantity
+            cart_item.save()
+
+            return jsonify({
+                'success': True,
+                'message': 'Cantidad actualizada',
+                'data': {
+                    'id_cart': cart_item.id_cart,
+                    'id_user': cart_item.id_user.id_user,
+                    'id_product': cart_item.id_product.id_product,
+                    'quantity': cart_item.quantity
+                }
+            }), 200
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    
+
+
+@app.route('/cart/<int:cart_id>', methods=['DELETE'])
+def delete_cart_item(cart_id):
+    try:
+        cart_item = Cart.get_or_none(Cart.id_cart == cart_id)
+
+        if not cart_item:
+            return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
+        
+        cart_item.delete_instance()
+
+        return jsonify({
+            'success': True,
+            'message': 'Item eliminado del carrito'
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 # Remover producto del carrito
