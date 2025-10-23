@@ -74,9 +74,27 @@ cp .env.example .env
 ```
 
 5. **Ejecutar migraciones**
+
+**Opción A - Script Python (Recomendado para Windows):**
+```bash
+python3 run_migration.py
+```
+
+**Opción B - MySQL CLI (Linux/macOS):**
 ```bash
 mysql -u root list_products < migrations/001_add_guest_support.sql
 ```
+
+**Opción C - Windows CMD:**
+```cmd
+mysql -u root list_products < migrations\001_add_guest_support.sql
+```
+
+**Opción D - MySQL Workbench:**
+- Abrir MySQL Workbench
+- Conectar al servidor
+- Abrir el archivo `migrations/001_add_guest_support.sql`
+- Ejecutar con el botón "Execute" (⚡) o `Ctrl + Shift + Enter`
 
 6. **Poblar base de datos (opcional)**
 ```bash
