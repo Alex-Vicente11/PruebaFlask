@@ -1064,7 +1064,29 @@ def add_to_cart():
         # Convertir y procesar
         user_id = int(user_id)
         product_id = int(product_id)
-        
+
+        # VALIDAR QUE EL USUARIO EXISTA
+        user_exists = User.get_or_none(User.id_user == user_id)
+        if not user_exists:
+            if is_json_request:
+                return jsonify({
+                    'success': False,
+                    'error': 'User does not exist. Please create a guest user first.'
+                }), 404
+            else:
+                return redirect(url_for('cart_view', user_id=user_id, error='Usuario no encontrado'))
+
+        # VALIDAR QUE EL PRODUCTO EXISTA
+        product_exists = Product.get_or_none(Product.id_product == product_id)
+        if not product_exists:
+            if is_json_request:
+                return jsonify({
+                    'success': False,
+                    'error': 'Product does not exist'
+                }), 404
+            else:
+                return redirect(url_for('cart_view', user_id=user_id, error='Producto no encontrado'))
+
         # Buscar si el producto ya existe en el carrito del usuario
         carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == product_id))
         
