@@ -46,7 +46,8 @@ db = MySQLDatabase(
     user=os.getenv('DB_USER', 'root'),
     password=os.getenv('DB_PASSWORD', ''),
     host=os.getenv('DB_HOST', 'localhost'),
-    port=int(os.getenv('DB_PORT', 3306))
+    port=int(os.getenv('DB_PORT', 3306)),
+    ssl={'ssl_disabled': True}  # Usar por error 2026 (HY000): TLS/SSL
 )
 
 # Configuración MySQL usando variables de entorno
@@ -378,6 +379,303 @@ def register():
         }), 500
 
 
+
+# ===================================
+# ENDPOINTS PROTEGIDOS DEL CARRITO
+# ===================================
+
+@app.route('/api/cart', methods=['GET'])
+@require_auth
+def get_cart():
+    """
+    Obtener carrito del usuario autenticado
+    Requiere JWT token en header: Authorization: Bearer TOKEN
+    """
+    try:
+        user_id = request.user_id  # Del decorator @require_auth
+        
+        # Obtener items del carrito con informaciÃ³n del producto
+        cart_items = (Cart
+            .select(Cart, Product)
+            .join(Product)
+            .where(Cart.id_user == user_id)
+            .order_by(Cart.added_date.desc()))
+        
+        items = []
+        total = 0
+        
+        for item in cart_items:
+            subtotal = item.quantity * float(item.id_product.price)
+            total += subtotal
+            
+            items.append({
+                'id_cart': item.id_cart,
+                'id_product': item.id_product.id_product,
+                'name': item.id_product.product,
+                'price': float(item.id_product.price),
+                'quantity': item.quantity,
+                'subtotal': subtotal,
+                'added_date': item.added_date.isoformat() if item.added_date else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'items': items,
+            'total': total,
+            'items_count': len(items)
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f'Error getting cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener carrito: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/add', methods=['POST'])
+@require_auth
+def add_to_cart_protected():
+    """
+    Agregar producto al carrito (version protegida)
+    Usa el user_id del token JWT, no del body
+    
+    Request JSON:
+    {
+        "id_product": 1,
+        "quantity": 2
+    }
+    """
+    try:
+        user_id = request.user_id  # Del token, no del body (mÃ¡s seguro)
+        data = request.get_json()
+        
+        if not data or 'id_product' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'id_product es requerido'
+            }), 400
+        
+        id_product = int(data['id_product'])
+        quantity = int(data.get('quantity', 1))
+        
+        if quantity < 1:
+            return jsonify({
+                'success': False,
+                'error': 'Cantidad debe ser mayor a 0'
+            }), 400
+        
+        # Verificar que el producto existe
+        product = Product.get_or_none(Product.id_product == id_product)
+        if not product:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no encontrado'
+            }), 404
+        
+        # Verificar si ya estÃ¡ en el carrito
+        existing = Cart.get_or_none(
+            (Cart.id_user == user_id) &
+            (Cart.id_product == id_product)
+        )
+        
+        if existing:
+            # Actualizar cantidad
+            existing.quantity += quantity
+            existing.save()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Cantidad actualizada',
+                'cart_item': {
+                    'id_cart': existing.id_cart,
+                    'id_product': id_product,
+                    'quantity': existing.quantity
+                }
+            }), 200
+        else:
+            # Crear nuevo item
+            new_item = Cart.create(
+                id_user=user_id,
+                id_product=id_product,
+                quantity=quantity
+            )
+            
+            return jsonify({
+                'success': True,
+                'message': 'Producto agregado al carrito',
+                'cart_item': {
+                    'id_cart': new_item.id_cart,
+                    'id_product': id_product,
+                    'quantity': quantity
+                }
+            }), 201
+            
+    except ValueError:
+        return jsonify({
+            'success': False,
+            'error': 'id_product y quantity deben ser numeros'
+        }), 400
+    except Exception as e:
+        app.logger.error(f'Error adding to cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al agregar al carrito: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/remove', methods=['DELETE'])
+@require_auth
+def remove_from_cart_protected():
+    """
+    Eliminar producto del carrito
+    
+    Request JSON:
+    {
+        "id_product": 1
+    }
+    """
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        
+        if not data or 'id_product' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'id_product es requerido'
+            }), 400
+        
+        id_product = int(data['id_product'])
+        
+        # Buscar item en el carrito
+        cart_item = Cart.get_or_none(
+            (Cart.id_user == user_id) &
+            (Cart.id_product == id_product)
+        )
+        
+        if not cart_item:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no esta en el carrito'
+            }), 404
+        
+        cart_item.delete_instance()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Producto eliminado del carrito'
+        }), 200
+        
+    except ValueError:
+        return jsonify({
+            'success': False,
+            'error': 'id_product debe ser un numero'
+        }), 400
+    except Exception as e:
+        app.logger.error(f'Error removing from cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al eliminar del carrito: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/update', methods=['PUT'])
+@require_auth
+def update_cart_quantity_protected():
+    """
+    Actualizar cantidad de un producto en el carrito
+    
+    Request JSON:
+    {
+        "id_product": 1,
+        "quantity": 5
+    }
+    """
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        
+        if not data or 'id_product' not in data or 'quantity' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'id_product y quantity son requeridos'
+            }), 400
+        
+        id_product = int(data['id_product'])
+        quantity = int(data['quantity'])
+        
+        if quantity < 1:
+            return jsonify({
+                'success': False,
+                'error': 'Cantidad debe ser mayor a 0'
+            }), 400
+        
+        # Buscar item
+        cart_item = Cart.get_or_none(
+            (Cart.id_user == user_id) &
+            (Cart.id_product == id_product)
+        )
+        
+        if not cart_item:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no esta en el carrito'
+            }), 404
+        
+        cart_item.quantity = quantity
+        cart_item.save()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Cantidad actualizada',
+            'cart_item': {
+                'id_cart': cart_item.id_cart,
+                'id_product': id_product,
+                'quantity': quantity
+            }
+        }), 200
+        
+    except ValueError:
+        return jsonify({
+            'success': False,
+            'error': 'id_product y quantity deben ser numeros'
+        }), 400
+    except Exception as e:
+        app.logger.error(f'Error updating cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al actualizar carrito: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/clear', methods=['DELETE'])
+@require_auth
+def clear_cart():
+    """
+    Vaciar completamente el carrito del usuario autenticado
+    """
+    try:
+        user_id = request.user_id
+        
+        deleted_count = Cart.delete().where(Cart.id_user == user_id).execute()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Carrito vaciado: {deleted_count} items eliminados',
+            'deleted_count': deleted_count
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f'Error clearing cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al vaciar carrito: {str(e)}'
+        }), 500
+
+
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     """
@@ -505,49 +803,106 @@ def manual_cart_merge():
 
 
 @app.route('/api/guest/cleanup', methods=['DELETE'])
-@require_auth
 def cleanup_old_guests():
     """
-    Eliminar usuarios guest inactivos (más de 30 días)
-    Requiere autenticación
+    Eliminar usuarios guest antiguos (inactivos por mÃ¡s de X dias)
+    
+    NO requiere autenticaciÃ³n - puede ejecutarse desde cron jobs
+    
+    Query Parameters:
+        - days: Dias de antigÃ¼edad (default: 30)
+        - dry_run: Si es 'true', solo muestra cuantos se eliminaran
     """
     try:
-        # Calcular fecha límite (30 días atrás)
-        cleanup_days = int(os.getenv('GUEST_CLEANUP_DAYS', 30))
-        cutoff_date = datetime.now() - timedelta(days=cleanup_days)
-
+        # Obtener parÃ¡metros
+        days = int(request.args.get('days', 30))
+        dry_run = request.args.get('dry_run', 'false').lower() == 'true'
+        
+        # ValidaciÃ³n
+        if days < 1:
+            return jsonify({
+                'success': False,
+                'error': 'El parametro days debe ser mayor a 0'
+            }), 400
+        
+        # Calcular fecha lÃ­mite
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
         # Buscar guests antiguos
         old_guests = User.select().where(
             (User.is_guest == True) &
             (User.created_at < cutoff_date)
         )
-
-        deleted_guests = 0
-        deleted_cart_items = 0
-
+        
+        count = old_guests.count()
+        
+        # Modo dry_run: solo mostrar informaciÃ³n
+        if dry_run:
+            guest_info = []
+            for guest in old_guests:
+                cart_count = Cart.select().where(Cart.id_user == guest.id_user).count()
+                days_old = (datetime.now() - guest.created_at).days if guest.created_at else 0
+                
+                guest_info.append({
+                    'id_user': guest.id_user,
+                    'guest_id': guest.guest_id,
+                    'created_at': guest.created_at.isoformat() if guest.created_at else None,
+                    'days_old': days_old,
+                    'cart_items': cart_count
+                })
+            
+            return jsonify({
+                'success': True,
+                'message': f'Se eliminaran {count} usuarios guest',
+                'count': count,
+                'dry_run': True,
+                'cutoff_date': cutoff_date.isoformat(),
+                'days_threshold': days,
+                'guests': guest_info
+            }), 200
+        
+        # Modo real: eliminar guests y carritos
+        deleted_carts = 0
+        deleted_users = 0
+        deleted_guests_info = []
+        
         for guest in old_guests:
-            # Eliminar items del carrito
+            # Eliminar carrito
             cart_count = Cart.delete().where(Cart.id_user == guest.id_user).execute()
-            deleted_cart_items += cart_count
-
+            deleted_carts += cart_count
+            
+            deleted_guests_info.append({
+                'id_user': guest.id_user,
+                'guest_id': guest.guest_id,
+                'cart_items_deleted': cart_count
+            })
+            
             # Eliminar usuario
             guest.delete_instance()
-            deleted_guests += 1
-
-        app.logger.info(f"Cleanup: {deleted_guests} guests, {deleted_cart_items} cart items")
-
+            deleted_users += 1
+            
+            app.logger.info(f'Deleted old guest {guest.id_user} ({cart_count} items)')
+        
         return jsonify({
             'success': True,
-            'deleted_guests': deleted_guests,
-            'deleted_cart_items': deleted_cart_items,
-            'message': f'Cleanup completed: {deleted_guests} guests deleted'
+            'message': f'Limpieza completada: {deleted_users} guests eliminados',
+            'deleted_users': deleted_users,
+            'deleted_cart_items': deleted_carts,
+            'days_threshold': days,
+            'cutoff_date': cutoff_date.isoformat(),
+            'guests_deleted': deleted_guests_info
         }), 200
-
-    except Exception as e:
-        app.logger.error(f"Error in cleanup: {str(e)}")
+        
+    except ValueError as e:
         return jsonify({
             'success': False,
-            'message': f'Error during cleanup: {str(e)}'
+            'error': f'Parametro invalido: {str(e)}'
+        }), 400
+    except Exception as e:
+        app.logger.error(f'Error in cleanup: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al limpiar guests: {str(e)}'
         }), 500
 
 
