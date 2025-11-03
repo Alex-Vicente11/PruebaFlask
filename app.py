@@ -148,6 +148,54 @@ def teardown_request(exception):
         db.close()
 
 
+# ===============
+# ERROR HANDLERS
+# ===============
+
+@app.errorhandler(401)
+def unauthorized_error(error):
+    """Manejo personalizado de errores 401 Unathorized"""
+    return jsonify({
+        'success': False,
+        'error': 'Unauthorized',
+        'message': 'Invalid or expired token. Please login again',
+        'code': 401
+    }), 401
+
+
+@app.errorhandler(403)
+def forbidden_error(error):
+    """Manejo personalizado de errores 403 Forbidden"""
+    return jsonify({
+        'success': False,
+        'error': 'Forbidden',
+        'message': 'You do not have permission to access this resource',
+        'code': 403
+    }), 403
+
+
+@app.errorhandler(404)
+def not_found_error(error):
+    """Manejo personalizado de errores 404 Not Found"""
+    return jsonify({
+        'success': False,
+        'error': 'Not Found',
+        'message': 'The requested resource was not found.',
+        'code': 404
+    }), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Manejo personalizado de errores 500 Internal Server Error"""
+    return jsonify({
+        'success': False,
+        'error': 'Internal Server Error',
+        'message': 'An internal server error ocurred. Please try again later',
+        'code': 500
+    }), 500
+
+
 # ====================
 # GUEST USER FUNCTIONS
 # ====================
@@ -207,6 +255,54 @@ def merge_cart(guest_user_id, real_user_id):
         app.logger.error(f"Error merging cart: {str(e)}")
         raise
 
+
+
+# =============
+# HEALTH CHECK
+# =============
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """
+    Health check para verificar que el API esta funcionando
+
+    Response:
+        {
+            "status": "ok",
+            "timestamp": "2025-11-01T12:00:00",
+            "version": "1.0.0",
+            "database": "connected"
+        }
+    """
+
+    try:
+        db_connected = not db.is_closed()
+
+        # Intentar query simple para verificar conexion real
+        if db_connected:
+            try:
+                User.select().limit(1).count()
+                db_status = 'connected'
+                except Exception:
+                    db_status = 'error'
+        else:
+            db_status = 'disconnected'
+
+        status = 'ok' if db_status == 'connected' else 'degraded'
+
+        return jsonify({
+            'status': status,
+            'timestamp': datetime.now().isoformat(),
+            'version': '1.0.0',
+            'datebase': db_status
+        }), 200 if status == 'ok' else 503
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'timestamp': datetime.now().isoformat(),
+            'error': str(e)
+        }), 500
 
 # ====================
 # GUEST USER ENDPOINTS
@@ -279,526 +375,6 @@ def create_guest():
         return jsonify({
             'success': False,
             'message': f'Error creating guest user: {str(e)}'
-        }), 500
-
-
-# ====================
-# AUTHENTICATION ENDPOINTS
-# ====================
-
-@app.route('/api/auth/register', methods=['POST'])
-def register():
-    """
-    Registrar nuevo usuario (con fusión de carrito si viene de guest)
-
-    Request JSON:
-    {
-        "email": "user@example.com",
-        "password": "securePassword123",
-        "user_name": "John Doe",
-        "guest_id": "guest_uuid4_..." (OPCIONAL)
-    }
-    """
-    try:
-        data = request.get_json()
-
-        # Validaciones
-        if not data or 'email' not in data or 'password' not in data:
-            return jsonify({
-                'success': False,
-                'message': 'email and password are required'
-            }), 400
-
-        email = data['email']
-        password = data['password']
-        user_name = data.get('user_name', 'User')
-        guest_id = data.get('guest_id')
-
-        # Validar email (sin verificación DNS para desarrollo)
-        try:
-            validate_email(email, check_deliverability=False)
-        except EmailNotValidError:
-            return jsonify({
-                'success': False,
-                'message': 'Invalid email format'
-            }), 400
-
-        # Verificar si el email ya existe
-        existing_user = User.get_or_none(User.email == email)
-        if existing_user:
-            return jsonify({
-                'success': False,
-                'message': 'Email already registered'
-            }), 409
-
-        # Crear nuevo usuario
-        max_id = User.select(fn.COALESCE(fn.MAX(User.id_user), 0).alias('max_id')).scalar()
-        new_id = max_id + 1
-
-        hashed_password = hash_password(password)
-
-        new_user = User.create(
-            id_user=new_id,
-            user_name=user_name,
-            email=email,
-            password_hash=hashed_password,
-            is_guest=False,
-            guest_id=None
-        )
-
-        # Si viene de guest, fusionar carrito
-        cart_migrated = False
-        cart_items_count = 0
-
-        if guest_id:
-            guest_user = User.get_or_none(User.guest_id == guest_id)
-            if guest_user:
-                merge_result = merge_cart(guest_user.id_user, new_user.id_user)
-                cart_migrated = True
-                cart_items_count = merge_result['total_items']
-                app.logger.info(f"Cart merged for new user {new_id}: {cart_items_count} items")
-
-        # Generar token JWT
-        token = generate_jwt(new_user.id_user, is_guest=False)
-
-        return jsonify({
-            'success': True,
-            'user_id': new_user.id_user,
-            'is_guest': False,
-            'token': token,
-            'cart_migrated': cart_migrated,
-            'cart_items_count': cart_items_count,
-            'message': 'User registered successfully'
-        }), 201
-
-    except Exception as e:
-        app.logger.error(f"Error registering user: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error registering user: {str(e)}'
-        }), 500
-
-
-
-# ===================================
-# ENDPOINTS PROTEGIDOS DEL CARRITO
-# ===================================
-
-@app.route('/api/cart', methods=['GET'])
-@require_auth
-def get_cart():
-    """
-    Obtener carrito del usuario autenticado
-    Requiere JWT token en header: Authorization: Bearer TOKEN
-    """
-    try:
-        user_id = request.user_id  # Del decorator @require_auth
-        
-        # Obtener items del carrito con informaciÃ³n del producto
-        cart_items = (Cart
-            .select(Cart, Product)
-            .join(Product)
-            .where(Cart.id_user == user_id)
-            .order_by(Cart.added_date.desc()))
-        
-        items = []
-        total = 0
-        
-        for item in cart_items:
-            subtotal = item.quantity * float(item.id_product.price)
-            total += subtotal
-            
-            items.append({
-                'id_cart': item.id_cart,
-                'id_product': item.id_product.id_product,
-                'name': item.id_product.product,
-                'price': float(item.id_product.price),
-                'quantity': item.quantity,
-                'subtotal': subtotal,
-                'added_date': item.added_date.isoformat() if item.added_date else None
-            })
-        
-        return jsonify({
-            'success': True,
-            'user_id': user_id,
-            'items': items,
-            'total': total,
-            'items_count': len(items)
-        }), 200
-        
-    except Exception as e:
-        app.logger.error(f'Error getting cart: {str(e)}')
-        return jsonify({
-            'success': False,
-            'error': f'Error al obtener carrito: {str(e)}'
-        }), 500
-
-
-@app.route('/api/cart/add', methods=['POST'])
-@require_auth
-def add_to_cart_protected():
-    """
-    Agregar producto al carrito (version protegida)
-    Usa el user_id del token JWT, no del body
-    
-    Request JSON:
-    {
-        "id_product": 1,
-        "quantity": 2
-    }
-    """
-    try:
-        user_id = request.user_id  # Del token, no del body (mÃ¡s seguro)
-        data = request.get_json()
-        
-        if not data or 'id_product' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'id_product es requerido'
-            }), 400
-        
-        id_product = int(data['id_product'])
-        quantity = int(data.get('quantity', 1))
-        
-        if quantity < 1:
-            return jsonify({
-                'success': False,
-                'error': 'Cantidad debe ser mayor a 0'
-            }), 400
-        
-        # Verificar que el producto existe
-        product = Product.get_or_none(Product.id_product == id_product)
-        if not product:
-            return jsonify({
-                'success': False,
-                'error': 'Producto no encontrado'
-            }), 404
-        
-        # Verificar si ya estÃ¡ en el carrito
-        existing = Cart.get_or_none(
-            (Cart.id_user == user_id) &
-            (Cart.id_product == id_product)
-        )
-        
-        if existing:
-            # Actualizar cantidad
-            existing.quantity += quantity
-            existing.save()
-            
-            return jsonify({
-                'success': True,
-                'message': 'Cantidad actualizada',
-                'cart_item': {
-                    'id_cart': existing.id_cart,
-                    'id_product': id_product,
-                    'quantity': existing.quantity
-                }
-            }), 200
-        else:
-            # Crear nuevo item
-            new_item = Cart.create(
-                id_user=user_id,
-                id_product=id_product,
-                quantity=quantity
-            )
-            
-            return jsonify({
-                'success': True,
-                'message': 'Producto agregado al carrito',
-                'cart_item': {
-                    'id_cart': new_item.id_cart,
-                    'id_product': id_product,
-                    'quantity': quantity
-                }
-            }), 201
-            
-    except ValueError:
-        return jsonify({
-            'success': False,
-            'error': 'id_product y quantity deben ser numeros'
-        }), 400
-    except Exception as e:
-        app.logger.error(f'Error adding to cart: {str(e)}')
-        return jsonify({
-            'success': False,
-            'error': f'Error al agregar al carrito: {str(e)}'
-        }), 500
-
-
-@app.route('/api/cart/remove', methods=['DELETE'])
-@require_auth
-def remove_from_cart_protected():
-    """
-    Eliminar producto del carrito
-    
-    Request JSON:
-    {
-        "id_product": 1
-    }
-    """
-    try:
-        user_id = request.user_id
-        data = request.get_json()
-        
-        if not data or 'id_product' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'id_product es requerido'
-            }), 400
-        
-        id_product = int(data['id_product'])
-        
-        # Buscar item en el carrito
-        cart_item = Cart.get_or_none(
-            (Cart.id_user == user_id) &
-            (Cart.id_product == id_product)
-        )
-        
-        if not cart_item:
-            return jsonify({
-                'success': False,
-                'error': 'Producto no esta en el carrito'
-            }), 404
-        
-        cart_item.delete_instance()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Producto eliminado del carrito'
-        }), 200
-        
-    except ValueError:
-        return jsonify({
-            'success': False,
-            'error': 'id_product debe ser un numero'
-        }), 400
-    except Exception as e:
-        app.logger.error(f'Error removing from cart: {str(e)}')
-        return jsonify({
-            'success': False,
-            'error': f'Error al eliminar del carrito: {str(e)}'
-        }), 500
-
-
-@app.route('/api/cart/update', methods=['PUT'])
-@require_auth
-def update_cart_quantity_protected():
-    """
-    Actualizar cantidad de un producto en el carrito
-    
-    Request JSON:
-    {
-        "id_product": 1,
-        "quantity": 5
-    }
-    """
-    try:
-        user_id = request.user_id
-        data = request.get_json()
-        
-        if not data or 'id_product' not in data or 'quantity' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'id_product y quantity son requeridos'
-            }), 400
-        
-        id_product = int(data['id_product'])
-        quantity = int(data['quantity'])
-        
-        if quantity < 1:
-            return jsonify({
-                'success': False,
-                'error': 'Cantidad debe ser mayor a 0'
-            }), 400
-        
-        # Buscar item
-        cart_item = Cart.get_or_none(
-            (Cart.id_user == user_id) &
-            (Cart.id_product == id_product)
-        )
-        
-        if not cart_item:
-            return jsonify({
-                'success': False,
-                'error': 'Producto no esta en el carrito'
-            }), 404
-        
-        cart_item.quantity = quantity
-        cart_item.save()
-        
-        return jsonify({
-            'success': True,
-            'message': 'Cantidad actualizada',
-            'cart_item': {
-                'id_cart': cart_item.id_cart,
-                'id_product': id_product,
-                'quantity': quantity
-            }
-        }), 200
-        
-    except ValueError:
-        return jsonify({
-            'success': False,
-            'error': 'id_product y quantity deben ser numeros'
-        }), 400
-    except Exception as e:
-        app.logger.error(f'Error updating cart: {str(e)}')
-        return jsonify({
-            'success': False,
-            'error': f'Error al actualizar carrito: {str(e)}'
-        }), 500
-
-
-@app.route('/api/cart/clear', methods=['DELETE'])
-@require_auth
-def clear_cart():
-    """
-    Vaciar completamente el carrito del usuario autenticado
-    """
-    try:
-        user_id = request.user_id
-        
-        deleted_count = Cart.delete().where(Cart.id_user == user_id).execute()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Carrito vaciado: {deleted_count} items eliminados',
-            'deleted_count': deleted_count
-        }), 200
-        
-    except Exception as e:
-        app.logger.error(f'Error clearing cart: {str(e)}')
-        return jsonify({
-            'success': False,
-            'error': f'Error al vaciar carrito: {str(e)}'
-        }), 500
-
-
-
-
-@app.route('/api/auth/login', methods=['POST'])
-def login():
-    """
-    Login de usuario (con fusión de carrito si viene de guest)
-
-    Request JSON:
-    {
-        "email": "user@example.com",
-        "password": "securePassword123",
-        "guest_id": "guest_uuid4_..." (OPCIONAL)
-    }
-    """
-    try:
-        data = request.get_json()
-
-        # Validaciones
-        if not data or 'email' not in data or 'password' not in data:
-            return jsonify({
-                'success': False,
-                'message': 'email and password are required'
-            }), 400
-
-        email = data['email']
-        password = data['password']
-        guest_id = data.get('guest_id')
-
-        # Buscar usuario por email
-        user = User.get_or_none((User.email == email) & (User.is_guest == False))
-
-        if not user:
-            return jsonify({
-                'success': False,
-                'message': 'Invalid credentials'
-            }), 401
-
-        # Verificar contraseña
-        if not verify_password(password, user.password_hash):
-            return jsonify({
-                'success': False,
-                'message': 'Invalid credentials'
-            }), 401
-
-        # Si viene de guest, fusionar carrito
-        cart_migrated = False
-        cart_items_count = 0
-
-        if guest_id:
-            guest_user = User.get_or_none(User.guest_id == guest_id)
-            if guest_user:
-                merge_result = merge_cart(guest_user.id_user, user.id_user)
-                cart_migrated = True
-                cart_items_count = merge_result['total_items']
-                app.logger.info(f"Cart merged on login for user {user.id_user}: {cart_items_count} items")
-
-        # Generar token JWT
-        token = generate_jwt(user.id_user, is_guest=False)
-
-        return jsonify({
-            'success': True,
-            'user_id': user.id_user,
-            'user_name': user.user_name,
-            'email': user.email,
-            'is_guest': False,
-            'token': token,
-            'cart_migrated': cart_migrated,
-            'cart_items_count': cart_items_count,
-            'message': 'Login successful'
-        }), 200
-
-    except Exception as e:
-        app.logger.error(f"Error during login: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error during login: {str(e)}'
-        }), 500
-
-
-@app.route('/api/cart/merge', methods=['POST'])
-@require_auth
-def manual_cart_merge():
-    """
-    Fusión manual de carrito (backup por si falla automática)
-
-    Request JSON:
-    {
-        "guest_id": "guest_uuid4_..."
-    }
-    """
-    try:
-        data = request.get_json()
-
-        if not data or 'guest_id' not in data:
-            return jsonify({
-                'success': False,
-                'message': 'guest_id is required'
-            }), 400
-
-        guest_id = data['guest_id']
-        real_user_id = request.user_id
-
-        # Buscar usuario guest
-        guest_user = User.get_or_none(User.guest_id == guest_id)
-
-        if not guest_user:
-            return jsonify({
-                'success': False,
-                'message': 'Guest user not found'
-            }), 404
-
-        # Fusionar carrito
-        merge_result = merge_cart(guest_user.id_user, real_user_id)
-
-        return jsonify({
-            'success': True,
-            'merged_items': merge_result['total_items'],
-            'message': 'Cart successfully merged'
-        }), 200
-
-    except Exception as e:
-        app.logger.error(f"Error in manual cart merge: {str(e)}")
-        return jsonify({
-            'success': False,
-            'message': f'Error merging cart: {str(e)}'
         }), 500
 
 
@@ -904,6 +480,1040 @@ def cleanup_old_guests():
             'success': False,
             'error': f'Error al limpiar guests: {str(e)}'
         }), 500
+
+
+# ====================
+# AUTHENTICATION ENDPOINTS
+# ====================
+
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    """
+    Registrar nuevo usuario (con fusión de carrito si viene de guest)
+
+    Request JSON:
+    {
+        "email": "user@example.com",
+        "password": "securePassword123",
+        "user_name": "John Doe",
+        "guest_id": "guest_uuid4_..." (OPCIONAL)
+    }
+    """
+    try:
+        data = request.get_json()
+
+        # Validaciones
+        if not data or 'email' not in data or 'password' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'email and password are required'
+            }), 400
+
+        email = data['email']
+        password = data['password']
+        user_name = data.get('user_name', 'User')
+        guest_id = data.get('guest_id')
+
+        # Validar email (sin verificación DNS para desarrollo)
+        try:
+            validate_email(email, check_deliverability=False)
+        except EmailNotValidError:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid email format'
+            }), 400
+
+        # Verificar si el email ya existe
+        existing_user = User.get_or_none(User.email == email)
+        if existing_user:
+            return jsonify({
+                'success': False,
+                'message': 'Email already registered'
+            }), 409
+
+        # Crear nuevo usuario
+        max_id = User.select(fn.COALESCE(fn.MAX(User.id_user), 0).alias('max_id')).scalar()
+        new_id = max_id + 1
+
+        hashed_password = hash_password(password)
+
+        new_user = User.create(
+            id_user=new_id,
+            user_name=user_name,
+            email=email,
+            password_hash=hashed_password,
+            is_guest=False,
+            guest_id=None
+        )
+
+        # Si viene de guest, fusionar carrito
+        cart_migrated = False
+        cart_items_count = 0
+
+        if guest_id:
+            guest_user = User.get_or_none(User.guest_id == guest_id)
+            if guest_user:
+                merge_result = merge_cart(guest_user.id_user, new_user.id_user)
+                cart_migrated = True
+                cart_items_count = merge_result['total_items']
+                app.logger.info(f"Cart merged for new user {new_id}: {cart_items_count} items")
+
+        # Generar token JWT
+        token = generate_jwt(new_user.id_user, is_guest=False)
+
+        return jsonify({
+            'success': True,
+            'user_id': new_user.id_user,
+            'is_guest': False,
+            'token': token,
+            'cart_migrated': cart_migrated,
+            'cart_items_count': cart_items_count,
+            'message': 'User registered successfully'
+        }), 201
+
+    except Exception as e:
+        app.logger.error(f"Error registering user: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error registering user: {str(e)}'
+        }), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """
+    Login de usuario (con fusión de carrito si viene de guest)
+
+    Request JSON:
+    {
+        "email": "user@example.com",
+        "password": "securePassword123",
+        "guest_id": "guest_uuid4_..." (OPCIONAL)
+    }
+    """
+    try:
+        data = request.get_json()
+
+        # Validaciones
+        if not data or 'email' not in data or 'password' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'email and password are required'
+            }), 400
+
+        email = data['email']
+        password = data['password']
+        guest_id = data.get('guest_id')
+
+        # Buscar usuario por email
+        user = User.get_or_none((User.email == email) & (User.is_guest == False))
+
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid credentials'
+            }), 401
+
+        # Verificar contraseña
+        if not verify_password(password, user.password_hash):
+            return jsonify({
+                'success': False,
+                'message': 'Invalid credentials'
+            }), 401
+
+        # Si viene de guest, fusionar carrito
+        cart_migrated = False
+        cart_items_count = 0
+
+        if guest_id:
+            guest_user = User.get_or_none(User.guest_id == guest_id)
+            if guest_user:
+                merge_result = merge_cart(guest_user.id_user, user.id_user)
+                cart_migrated = True
+                cart_items_count = merge_result['total_items']
+                app.logger.info(f"Cart merged on login for user {user.id_user}: {cart_items_count} items")
+
+        # Generar token JWT
+        token = generate_jwt(user.id_user, is_guest=False)
+
+        return jsonify({
+            'success': True,
+            'user_id': user.id_user,
+            'user_name': user.user_name,
+            'email': user.email,
+            'is_guest': False,
+            'token': token,
+            'cart_migrated': cart_migrated,
+            'cart_items_count': cart_items_count,
+            'message': 'Login successful'
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error during login: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error during login: {str(e)}'
+        }), 500
+
+
+@app.route('/api/auth/validate', methods=['GET'])
+@require_auth
+def validate_token():
+    """
+    Validar si el token JWT es valido
+
+    Headers:
+        Authorization: Bearer <token>
+
+    Reponse:
+        {
+            "success": true,
+            "valid": true,
+            "user_id": 123,
+            "user_name": "John Doe",
+            "email": "user@example.com",
+            "is_guest": false,
+            "message": "Token is valid"
+        }
+    """
+    try: 
+        user_id = request.user_id
+
+        user = User.get_or_none(User.id_user == user_id)
+
+        if not user: 
+            return jsonify({
+                'success': False,
+                'valid': False,
+                'message': 'User not found'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'valid': True,
+            'user_id': user.id_user,
+            'user_name': user.user_name,
+            'email': user.email,
+            'is_guest': user.is_guest,
+            'message': 'Token is valid'
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error validating token: {str(e)}")
+        return jsonify({
+            'success': False,
+            'valid': False,
+            'message': f'Error validating token {str(e)}'
+        }), 500
+
+
+@app.route('/api/auth/profile', methods=['GET', 'PUT'])
+@require_auth
+def user_profile():
+    """
+    GET: Obtener perfil de usuario autenticado
+    PUT: Actualizar perfil del usuario autenticado
+
+    Headers: 
+        Authorization: Bearer <token>
+
+    PUT Request JSON:
+        {
+            "user_name": "New Name"
+        }
+    """
+
+    try:
+        user_id = request.user_id
+        user = User.get_or_none(User.id_user == user_id)
+
+        if not user: 
+            return jsonify({
+                'success': False,
+                'message': 'User not found'
+            }), 404
+
+        if request.method == 'GET':
+            return jsonify({
+                'success': True,
+                'user': {
+                    'id_user': user.id_user,
+                    'user_name': user.user_name,
+                    'email': user.email,
+                    'is_guest': user.is_guest,
+                    'created_at': user.created_at.isoformat() if user.created_at else None
+                }
+            }), 200
+
+        elif request.method == 'PUT':
+            data = request.get_json()
+
+            if not data: 
+                return jsonify({
+                    'success': False,
+                    'message': 'No data provided'
+                }), 400
+
+            updated = False
+
+            if not updated: 
+                return jsonify({
+                    'success': False,
+                    'message': 'No valid data to update'
+                }), 400
+
+            user.save()
+
+            return jsonify({
+                'success': True, 
+                'message': 'Profile updated successfully',
+                'user': {
+                    'id_user': user.id_user,
+                    'user_name': user.user_name,
+                    'email': user.email,
+                    'is_guest': user.is_guest
+                }
+            }), 200
+
+    except Exception as e:
+        app.logger.error(f'Error in profile endpoint: {str(e)}')
+        return jsonify({
+            'success': False,
+            'message': f'Error: {str(e)}'
+        }), 500
+
+
+
+# ===================================
+# ENDPOINTS PROTEGIDOS DEL CARRITO
+# ===================================
+
+@app.route('/api/cart', methods=['GET'])
+@require_auth
+def get_cart():
+    """
+    Obtener carrito del usuario autenticado
+    Requiere JWT token en header: Authorization: Bearer TOKEN
+    """
+    try:
+        user_id = request.user_id  # Del decorator @require_auth
+        
+        # Obtener items del carrito con informaciÃ³n del producto
+        cart_items = (Cart
+            .select(Cart, Product)
+            .join(Product)
+            .where(Cart.id_user == user_id)
+            .order_by(Cart.added_date.desc()))
+        
+        items = []
+        total = 0
+        
+        for item in cart_items:
+            subtotal = item.quantity * float(item.id_product.price)
+            total += subtotal
+            
+            items.append({
+                'id_cart': item.id_cart,
+                'id_product': item.id_product.id_product,
+                'name': item.id_product.product,
+                'price': float(item.id_product.price),
+                'quantity': item.quantity,
+                'subtotal': subtotal,
+                'added_date': item.added_date.isoformat() if item.added_date else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'items': items,
+            'total': total,
+            'items_count': len(items)
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f'Error getting cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener carrito: {str(e)}'
+        }), 500
+
+
+
+@app.route('/api/cart/items', methods=['GET'])
+@require_auth
+def get_cart_items():
+    """
+    Obtener items del carrito del usuario autenticado (version detallada)
+    Usa el user_id del token JWT
+
+    Headers:
+        Authorization: Bearer <token>
+
+    Response: 
+        {
+            "success": true,
+            "items": [
+                {
+                    "id_cart": 1,
+                    "product": {
+                        "id_product": 5, 
+                        "product": "Product Name",
+                        "price": 99.99
+                    },
+                    "quantity": 2,
+                    "subtotal": 199.98,
+                    "added_date": "2025-11-01T12:00:00"
+                }
+            ],
+            "total": 199.98,
+            "items_count": 1
+        }
+    """
+    try:
+        user_id = request.user_id
+
+        cart_items = (Cart
+            .select(Cart, Product)
+            .join(Product)
+            .where(Cart.id_user == user_id)
+            .order_by(Cart.added_date.desc())    
+        )
+
+        items = []
+        total = 0
+
+        for item in cart_items:
+            subtotal = item.quantity * float(item.id_product.price)
+            total += subtotal
+
+            items.append({
+                'id_cart': item.id_cart,
+                'product': {
+                    'id_product': item.id_product.id_product,
+                    'product': item.id_product.product,
+                    'price': float(item.id_product.price)
+                },
+                'quantity': item.quantity,
+                'subtotal': subtotal,
+                'added_date': item.added_date.isoformat() if item.added_date else None
+            })
+
+        return jsonify({
+            'success': True,
+            'items': itemns,
+            'total': total,
+            'items_count': len(items)
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f'Error getting cart items: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al obtener items: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/count', methods=['GET'])
+@require_auth
+def get_cart_count():
+    """
+    Obtener solo el conteo de items en el carrito (más rápido)
+
+    Headers: 
+        Authorization: Bearer <token>
+
+    Response: 
+        {
+            "success": true,
+            "count": 5,
+            "unique_products": 3
+        }
+    """
+
+    try: 
+        user_id = request.user_id
+
+        total_items = Cart.select(fn.SUM(Cart.quantity)).where(
+            Cart.id_user == user_id
+        ).scalar() or 0
+
+        unique_products = Cart.select().where(Cart.id_user == user_id).count()
+
+        return jsonify({
+            'success': True,
+            'count': int(total_items),
+            'unique_products': unique_products
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f'Error getting cart count: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/check/<int: product_id>', methods=['GET'])
+@require_auth
+def check_product_in_cart(product_id):
+    """
+    Verificar si un producto esta en el carrito del usuario autenticado
+
+    Headers:
+        Authorization: Bearer <token>
+
+    Response:
+        {
+            "success": true,
+            "exists": true,
+            "cart_item": {
+                "id_cart": 5,
+                "id_product": 10,
+                "quantity": 2
+            }
+        }
+    """
+    try:
+        user_id = request.user_id
+
+        cart_item = Cart.get_or_none(
+            (Cart.id_user == user_id) &
+            (Cart.id_product == product_id)
+        )
+
+        if cart_item:
+            return jsonify({
+                'success': True,
+                'exists': True,
+                'cart_item': {
+                    'id_cart': cart_item.id_cart,
+                    'id_product': product_id,
+                    'quantity': cart_item.quantity
+                }
+            }), 200
+        else:
+            return jsonify({
+                'success': True,
+                'exists': False,
+                'cart_item': None
+            }), 200
+
+    except Exception as e:
+        app.logger.error(f'Error checking cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error checking cart: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/add', methods=['POST'])
+@require_auth
+def add_to_cart_protected():
+    """
+    Agregar producto al carrito (version protegida)
+    Usa el user_id del token JWT, no del body
+    
+    Request JSON:
+    {
+        "id_product": 1,
+        "quantity": 2
+    }
+    """
+    try:
+        user_id = request.user_id  # Del token, no del body (mÃ¡s seguro)
+        data = request.get_json()
+        
+        if not data or 'id_product' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'id_product es requerido'
+            }), 400
+        
+        id_product = int(data['id_product'])
+        quantity = int(data.get('quantity', 1))
+        
+        if quantity < 1:
+            return jsonify({
+                'success': False,
+                'error': 'Cantidad debe ser mayor a 0'
+            }), 400
+        
+        # Verificar que el producto existe
+        product = Product.get_or_none(Product.id_product == id_product)
+        if not product:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no encontrado'
+            }), 404
+        
+        # Verificar si ya esta en el carrito
+        existing = Cart.get_or_none(
+            (Cart.id_user == user_id) &
+            (Cart.id_product == id_product)
+        )
+        
+        if existing:
+            # Actualizar cantidad
+            existing.quantity += quantity
+            existing.save()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Cantidad actualizada',
+                'cart_item': {
+                    'id_cart': existing.id_cart,
+                    'id_product': id_product,
+                    'quantity': existing.quantity
+                }
+            }), 200
+        else:
+            # Crear nuevo item
+            new_item = Cart.create(
+                id_user=user_id,
+                id_product=id_product,
+                quantity=quantity
+            )
+            
+            return jsonify({
+                'success': True,
+                'message': 'Producto agregado al carrito',
+                'cart_item': {
+                    'id_cart': new_item.id_cart,
+                    'id_product': id_product,
+                    'quantity': quantity
+                }
+            }), 201
+            
+    except ValueError:
+        return jsonify({
+            'success': False,
+            'error': 'id_product y quantity deben ser numeros'
+        }), 400
+    except Exception as e:
+        app.logger.error(f'Error adding to cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al agregar al carrito: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/update', methods=['PUT'])
+@require_auth
+def update_cart_quantity_protected():
+    """
+    Actualizar cantidad de un producto en el carrito
+    
+    Request JSON:
+    {
+        "id_product": 1,
+        "quantity": 5
+    }
+    """
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        
+        if not data or 'id_product' not in data or 'quantity' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'id_product y quantity son requeridos'
+            }), 400
+        
+        id_product = int(data['id_product'])
+        quantity = int(data['quantity'])
+        
+        if quantity < 1:
+            return jsonify({
+                'success': False,
+                'error': 'Cantidad debe ser mayor a 0'
+            }), 400
+        
+        # Buscar item
+        cart_item = Cart.get_or_none(
+            (Cart.id_user == user_id) &
+            (Cart.id_product == id_product)
+        )
+        
+        if not cart_item:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no esta en el carrito'
+            }), 404
+        
+        cart_item.quantity = quantity
+        cart_item.save()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Cantidad actualizada',
+            'cart_item': {
+                'id_cart': cart_item.id_cart,
+                'id_product': id_product,
+                'quantity': quantity
+            }
+        }), 200
+        
+    except ValueError:
+        return jsonify({
+            'success': False,
+            'error': 'id_product y quantity deben ser numeros'
+        }), 400
+    except Exception as e:
+        app.logger.error(f'Error updating cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al actualizar carrito: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/remove', methods=['DELETE'])
+@require_auth
+def remove_from_cart_protected():
+    """
+    Eliminar producto del carrito
+    
+    Request JSON:
+    {
+        "id_product": 1
+    }
+    """
+    try:
+        user_id = request.user_id
+        data = request.get_json()
+        
+        if not data or 'id_product' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'id_product es requerido'
+            }), 400
+        
+        id_product = int(data['id_product'])
+        
+        # Buscar item en el carrito
+        cart_item = Cart.get_or_none(
+            (Cart.id_user == user_id) &
+            (Cart.id_product == id_product)
+        )
+        
+        if not cart_item:
+            return jsonify({
+                'success': False,
+                'error': 'Producto no esta en el carrito'
+            }), 404
+        
+        cart_item.delete_instance()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Producto eliminado del carrito'
+        }), 200
+        
+    except ValueError:
+        return jsonify({
+            'success': False,
+            'error': 'id_product debe ser un numero'
+        }), 400
+    except Exception as e:
+        app.logger.error(f'Error removing from cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al eliminar del carrito: {str(e)}'
+        }), 500
+
+
+
+@app.route('/api/cart/clear', methods=['DELETE'])
+@require_auth
+def clear_cart():
+    """
+    Vaciar completamente el carrito del usuario autenticado
+    """
+    try:
+        user_id = request.user_id
+        
+        deleted_count = Cart.delete().where(Cart.id_user == user_id).execute()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Carrito vaciado: {deleted_count} items eliminados',
+            'deleted_count': deleted_count
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f'Error clearing cart: {str(e)}')
+        return jsonify({
+            'success': False,
+            'error': f'Error al vaciar carrito: {str(e)}'
+        }), 500
+
+
+
+@app.route('/api/cart/merge', methods=['POST'])
+@require_auth
+def manual_cart_merge():
+    """
+    Fusión manual de carrito (backup por si falla automática)
+
+    Request JSON:
+    {
+        "guest_id": "guest_uuid4_..."
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data or 'guest_id' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'guest_id is required'
+            }), 400
+
+        guest_id = data['guest_id']
+        real_user_id = request.user_id
+
+        # Buscar usuario guest
+        guest_user = User.get_or_none(User.guest_id == guest_id)
+
+        if not guest_user:
+            return jsonify({
+                'success': False,
+                'message': 'Guest user not found'
+            }), 404
+
+        # Fusionar carrito
+        merge_result = merge_cart(guest_user.id_user, real_user_id)
+
+        return jsonify({
+            'success': True,
+            'merged_items': merge_result['total_items'],
+            'message': 'Cart successfully merged'
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error in manual cart merge: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error merging cart: {str(e)}'
+        }), 500
+
+
+# ====================
+# LEGACY CART ENDPOINT (DEPRECATED)
+# ====================
+
+@app.route('/add-to-cart', methods=['POST'])
+def add_to_cart_legacy():
+    """
+    DEPRECADO: Usar /api/cart/add con autenticación JWT
+    
+    Este endpoint se mantiene SOLO para compatibilidad con vistas web HTML
+    NO debe usarse desde Android (usar /api/cart/add)
+    """
+    try:
+        # Detectar tipo de request
+        data = request.get_json(silent=True)
+        
+        if data is not None:
+            # Request JSON desde Android - RECHAZAR
+            return jsonify({
+                'success': False,
+                'error': 'Este endpoint está deprecado. Use /api/cart/add con JWT token',
+                'deprecated': True,
+                'new_endpoint': '/api/cart/add',
+                'documentation': 'https://docs.example.com/api/cart'
+            }), 410  # 410 Gone - recurso deprecado
+        
+        # Si es formulario HTML, permitir (para vistas web)
+        user_id = request.form.get('user_id')
+        product_id = request.form.get('product_id')
+        quantity = int(request.form.get('quantity', 1))
+        
+        if not user_id or user_id == 'None' or not product_id or product_id == 'None':
+            return redirect(f'/cart-view?error=Debe seleccionar usuario y producto')
+        
+        user_id = int(user_id)
+        product_id = int(product_id)
+        
+        # Validar usuario existe
+        user_exists = User.get_or_none(User.id_user == user_id)
+        if not user_exists:
+            return redirect(url_for('cart_view', user_id=user_id, error='Usuario no encontrado'))
+        
+        # Validar producto existe
+        product_exists = Product.get_or_none(Product.id_product == product_id)
+        if not product_exists:
+            return redirect(url_for('cart_view', user_id=user_id, error='Producto no encontrado'))
+        
+        # Buscar item existente
+        carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == product_id))
+        
+        if carrito:
+            carrito.quantity += quantity
+            carrito.save()
+        else:
+            carrito = Cart.create(id_user=user_id, id_product=product_id, quantity=quantity)
+        
+        return redirect(f'/cart-view?user_id={user_id}&success=true')
+    
+    except Exception as e:
+        return redirect(f'/cart-view?error={str(e)}')
+
+
+# ====================
+# LEGACY CART ENDPOINTS (KEPT FOR WEB VIEWS)
+# ====================
+
+@app.route('/cart/user/<int:user_id>', methods=['GET'])
+def get_cart_items_by_user(user_id):
+    """
+    LEGACY: Obtener items del carrito por user_id
+    
+    NOTA: Este endpoint NO está protegido y se mantiene solo para vistas web.
+    Android debe usar /api/cart/items con JWT.
+    """
+    try:
+        cart_items = Cart.select().where(Cart.id_user == user_id)
+
+        if not cart_items.exists():
+            return jsonify([]), 200
+        
+        result = []
+        for cart_item in cart_items:
+            product = Product.get_by_id(cart_item.id_product)
+        
+            result.append({
+                'product': {
+                    'id_product': product.id_product,
+                    'product': product.product,
+                    'price': float(product.price)
+                },
+                'quantity': cart_item.quantity,
+                'addedDate': cart_item.added_date.strftime('%Y-%m-%d %H:%M:%S')
+            })
+
+        return jsonify(result), 200
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/cart/<int:user_id>/<int:product_id>', methods=['GET'])
+def get_cart_item(user_id, product_id):
+    """
+    LEGACY: Verificar si producto está en carrito
+    
+    Android debe usar /api/cart/check/<product_id> con JWT
+    """
+    try:
+        carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == product_id))
+
+        if carrito:
+            return jsonify({
+                'id_cart': carrito.id_cart,
+                'id_user': carrito.id_user.id_user,
+                'id_product': carrito.id_product.id_product,
+                'quantity': carrito.quantity
+            }), 200
+        else: 
+            return jsonify(None), 404
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/cart/<int:cart_id>', methods=['PUT'])
+def update_cart_quantity(cart_id):
+    """
+    LEGACY: Actualizar cantidad por cart_id
+    
+    Android debe usar /api/cart/update con JWT
+    """
+    try:
+        data = request.get_json()
+        
+        if not data or 'quantity' not in data:
+            return jsonify({'success': False, 'error': 'Quantity requerida'}), 400
+        
+        quantity = int(data['quantity'])
+
+        if quantity < 0:
+            return jsonify({'success': False, 'error': 'Cantidad no puede ser negativa'}), 400
+        
+        cart_item = Cart.get_or_none(Cart.id_cart == cart_id)
+
+        if not cart_item:
+            return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
+        
+        if quantity == 0:
+            cart_item.delete_instance()
+            return jsonify({
+                'success': True,
+                'message': 'Item eliminado del carrito'
+            }), 200
+        else: 
+            cart_item.quantity = quantity
+            cart_item.save()
+
+            return jsonify({
+                'success': True,
+                'message': 'Cantidad actualizada',
+                'data': {
+                    'id_cart': cart_item.id_cart,
+                    'id_user': cart_item.id_user.id_user,
+                    'id_product': cart_item.id_product.id_product,
+                    'quantity': cart_item.quantity
+                }
+            }), 200
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/cart/<int:cart_id>', methods=['DELETE'])
+def delete_cart_item(cart_id):
+    """
+    LEGACY: Eliminar item por cart_id
+    
+    Android debe usar /api/cart/remove con JWT
+    """
+    try:
+        cart_item = Cart.get_or_none(Cart.id_cart == cart_id)
+
+        if not cart_item:
+            return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
+        
+        cart_item.delete_instance()
+
+        return jsonify({
+            'success': True,
+            'message': 'Item eliminado del carrito'
+        }), 200
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/remove-from-cart', methods=['POST'])
+def remove_from_cart():
+    """
+    LEGACY: Remover producto del carrito (para vistas web)
+    """
+    try:
+        cart_id = request.form.get('cart_id')
+        user_id = request.form.get('user_id')
+
+        if not cart_id: 
+            return redirect(f'/cart?user_id={user_id or ""}')
+        
+        remove_product = Cart.get_or_none(cart_id == Cart.id_cart)
+
+        if remove_product:
+            remove_product.delete_instance()
+
+        return redirect(f'/cart?user_id={user_id}')
+    
+    except Exception as e:
+        return redirect(f'/cart?user_id={user_id or ""}')
 
 
 # CRUD para usuario (peewee)
