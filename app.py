@@ -2,8 +2,17 @@ from flask import Flask, render_template, request, url_for, redirect, jsonify
 import pymysql
 
 from peewee import *
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
+from dotenv import load_dotenv
+from flask_cors import CORS
+
+# Load environment variables
+load_dotenv()
+
+# Import authentication utilities
+from auth_utils import hash_password, verify_password, generate_jwt, decode_jwt, require_auth
+from email_validator import validate_email, EmailNotValidError
 def get_html_base (body):
 
      return """<!DOCTYPE html>
@@ -20,24 +29,33 @@ def get_html_base (body):
         </html>
         """
 
-app = Flask(__name__) 
+app = Flask(__name__)
 
-# Configuracion de la DB con Peewee
+# Configure CORS
+CORS(app, resources={
+    r"/api/*": {
+        "origins": os.getenv('ALLOWED_ORIGINS', '*'),
+        "methods": ["GET", "POST", "PUT", "DELETE"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
+
+# Configuracion de la DB con Peewee usando variables de entorno
 db = MySQLDatabase(
-    'list_products',
-    user='root',
-    password='Relic11&',
-    host='localhost',
-    port=3306
+    os.getenv('DB_NAME', 'list_products'),
+    user=os.getenv('DB_USER', 'root'),
+    password=os.getenv('DB_PASSWORD', ''),
+    host=os.getenv('DB_HOST', 'localhost'),
+    port=int(os.getenv('DB_PORT', 3306))
 )
 
-# Configuración MySQL
+# Configuración MySQL usando variables de entorno
 def get_db_connection():
     return pymysql.connect(
-        host='localhost',
-        user='root',
-        passwd='Relic11&',
-        database='list_products',
+        host=os.getenv('DB_HOST', 'localhost'),
+        user=os.getenv('DB_USER', 'root'),
+        passwd=os.getenv('DB_PASSWORD', ''),
+        database=os.getenv('DB_NAME', 'list_products'),
         cursorclass=pymysql.cursors.DictCursor
     )
 
@@ -54,6 +72,11 @@ class BaseModel(Model):
 class User(BaseModel):
     id_user = IntegerField(primary_key=True)
     user_name = CharField(max_length=100, null=False)
+    email = CharField(max_length=255, null=True, unique=True)
+    password_hash = CharField(max_length=255, null=True)
+    is_guest = BooleanField(default=False)
+    guest_id = CharField(max_length=100, null=True, unique=True)
+    created_at = DateTimeField(default=datetime.now)
 
     class Meta:
         table_name = 'user'
@@ -62,7 +85,11 @@ class User(BaseModel):
         # convierte el objeto a diccionario para JSON
         return {
             'id_user': self.id_user,
-            'user_name': self.user_name
+            'user_name': self.user_name,
+            'email': self.email,
+            'is_guest': self.is_guest,
+            'guest_id': self.guest_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None
         }
     
 
@@ -118,6 +145,410 @@ def before_request():
 def teardown_request(exception):
     if not db.is_closed():
         db.close()
+
+
+# ====================
+# GUEST USER FUNCTIONS
+# ====================
+
+def merge_cart(guest_user_id, real_user_id):
+    """
+    Fusiona el carrito de un usuario guest con un usuario real
+
+    Args:
+        guest_user_id (int): ID del usuario invitado
+        real_user_id (int): ID del usuario real registrado
+
+    Returns:
+        dict: {'merged_count': int, 'updated_count': int, 'total_items': int}
+    """
+    try:
+        # Obtener items del carrito del guest
+        guest_cart_items = Cart.select().where(Cart.id_user == guest_user_id)
+
+        merged_count = 0
+        updated_count = 0
+
+        for guest_item in guest_cart_items:
+            # Verificar si el producto ya existe en el carrito del usuario real
+            existing_item = Cart.get_or_none(
+                (Cart.id_user == real_user_id) &
+                (Cart.id_product == guest_item.id_product)
+            )
+
+            if existing_item:
+                # Si existe, sumar cantidades
+                existing_item.quantity += guest_item.quantity
+                existing_item.save()
+                updated_count += 1
+            else:
+                # Si no existe, cambiar el id_user
+                guest_item.id_user = real_user_id
+                guest_item.save()
+                merged_count += 1
+
+        # Eliminar items residuales del guest
+        deleted_count = Cart.delete().where(Cart.id_user == guest_user_id).execute()
+
+        # Eliminar usuario guest
+        User.delete().where(User.id_user == guest_user_id).execute()
+
+        app.logger.info(f"Cart merged: {merged_count} moved, {updated_count} updated, guest user {guest_user_id} deleted")
+
+        return {
+            'merged_count': merged_count,
+            'updated_count': updated_count,
+            'deleted_count': deleted_count,
+            'total_items': merged_count + updated_count
+        }
+
+    except Exception as e:
+        app.logger.error(f"Error merging cart: {str(e)}")
+        raise
+
+
+# ====================
+# GUEST USER ENDPOINTS
+# ====================
+
+@app.route('/api/guest/create', methods=['POST'])
+def create_guest():
+    """
+    Crear o recuperar usuario invitado
+
+    Request JSON:
+    {
+        "guest_id": "guest_uuid4_timestamp"
+    }
+
+    Response JSON:
+    {
+        "success": true,
+        "user_id": 123,
+        "is_guest": true,
+        "message": "Guest user created successfully"
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data or 'guest_id' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'guest_id is required'
+            }), 400
+
+        guest_id = data['guest_id']
+
+        # Verificar si el guest ya existe
+        existing_user = User.get_or_none(User.guest_id == guest_id)
+
+        if existing_user:
+            return jsonify({
+                'success': True,
+                'user_id': existing_user.id_user,
+                'is_guest': True,
+                'message': 'Guest user already exists'
+            }), 200
+
+        # Crear nuevo usuario guest
+        max_id = User.select(fn.COALESCE(fn.MAX(User.id_user), 0).alias('max_id')).scalar()
+        new_id = max_id + 1
+
+        new_guest = User.create(
+            id_user=new_id,
+            user_name='Guest User',
+            is_guest=True,
+            guest_id=guest_id,
+            email=None,
+            password_hash=None
+        )
+
+        app.logger.info(f"New guest created: {new_id} with guest_id: {guest_id}")
+
+        return jsonify({
+            'success': True,
+            'user_id': new_guest.id_user,
+            'is_guest': True,
+            'message': 'Guest user created successfully'
+        }), 201
+
+    except Exception as e:
+        app.logger.error(f"Error creating guest: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error creating guest user: {str(e)}'
+        }), 500
+
+
+# ====================
+# AUTHENTICATION ENDPOINTS
+# ====================
+
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    """
+    Registrar nuevo usuario (con fusión de carrito si viene de guest)
+
+    Request JSON:
+    {
+        "email": "user@example.com",
+        "password": "securePassword123",
+        "user_name": "John Doe",
+        "guest_id": "guest_uuid4_..." (OPCIONAL)
+    }
+    """
+    try:
+        data = request.get_json()
+
+        # Validaciones
+        if not data or 'email' not in data or 'password' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'email and password are required'
+            }), 400
+
+        email = data['email']
+        password = data['password']
+        user_name = data.get('user_name', 'User')
+        guest_id = data.get('guest_id')
+
+        # Validar email (sin verificación DNS para desarrollo)
+        try:
+            validate_email(email, check_deliverability=False)
+        except EmailNotValidError:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid email format'
+            }), 400
+
+        # Verificar si el email ya existe
+        existing_user = User.get_or_none(User.email == email)
+        if existing_user:
+            return jsonify({
+                'success': False,
+                'message': 'Email already registered'
+            }), 409
+
+        # Crear nuevo usuario
+        max_id = User.select(fn.COALESCE(fn.MAX(User.id_user), 0).alias('max_id')).scalar()
+        new_id = max_id + 1
+
+        hashed_password = hash_password(password)
+
+        new_user = User.create(
+            id_user=new_id,
+            user_name=user_name,
+            email=email,
+            password_hash=hashed_password,
+            is_guest=False,
+            guest_id=None
+        )
+
+        # Si viene de guest, fusionar carrito
+        cart_migrated = False
+        cart_items_count = 0
+
+        if guest_id:
+            guest_user = User.get_or_none(User.guest_id == guest_id)
+            if guest_user:
+                merge_result = merge_cart(guest_user.id_user, new_user.id_user)
+                cart_migrated = True
+                cart_items_count = merge_result['total_items']
+                app.logger.info(f"Cart merged for new user {new_id}: {cart_items_count} items")
+
+        # Generar token JWT
+        token = generate_jwt(new_user.id_user, is_guest=False)
+
+        return jsonify({
+            'success': True,
+            'user_id': new_user.id_user,
+            'is_guest': False,
+            'token': token,
+            'cart_migrated': cart_migrated,
+            'cart_items_count': cart_items_count,
+            'message': 'User registered successfully'
+        }), 201
+
+    except Exception as e:
+        app.logger.error(f"Error registering user: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error registering user: {str(e)}'
+        }), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """
+    Login de usuario (con fusión de carrito si viene de guest)
+
+    Request JSON:
+    {
+        "email": "user@example.com",
+        "password": "securePassword123",
+        "guest_id": "guest_uuid4_..." (OPCIONAL)
+    }
+    """
+    try:
+        data = request.get_json()
+
+        # Validaciones
+        if not data or 'email' not in data or 'password' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'email and password are required'
+            }), 400
+
+        email = data['email']
+        password = data['password']
+        guest_id = data.get('guest_id')
+
+        # Buscar usuario por email
+        user = User.get_or_none((User.email == email) & (User.is_guest == False))
+
+        if not user:
+            return jsonify({
+                'success': False,
+                'message': 'Invalid credentials'
+            }), 401
+
+        # Verificar contraseña
+        if not verify_password(password, user.password_hash):
+            return jsonify({
+                'success': False,
+                'message': 'Invalid credentials'
+            }), 401
+
+        # Si viene de guest, fusionar carrito
+        cart_migrated = False
+        cart_items_count = 0
+
+        if guest_id:
+            guest_user = User.get_or_none(User.guest_id == guest_id)
+            if guest_user:
+                merge_result = merge_cart(guest_user.id_user, user.id_user)
+                cart_migrated = True
+                cart_items_count = merge_result['total_items']
+                app.logger.info(f"Cart merged on login for user {user.id_user}: {cart_items_count} items")
+
+        # Generar token JWT
+        token = generate_jwt(user.id_user, is_guest=False)
+
+        return jsonify({
+            'success': True,
+            'user_id': user.id_user,
+            'user_name': user.user_name,
+            'email': user.email,
+            'is_guest': False,
+            'token': token,
+            'cart_migrated': cart_migrated,
+            'cart_items_count': cart_items_count,
+            'message': 'Login successful'
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error during login: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error during login: {str(e)}'
+        }), 500
+
+
+@app.route('/api/cart/merge', methods=['POST'])
+@require_auth
+def manual_cart_merge():
+    """
+    Fusión manual de carrito (backup por si falla automática)
+
+    Request JSON:
+    {
+        "guest_id": "guest_uuid4_..."
+    }
+    """
+    try:
+        data = request.get_json()
+
+        if not data or 'guest_id' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'guest_id is required'
+            }), 400
+
+        guest_id = data['guest_id']
+        real_user_id = request.user_id
+
+        # Buscar usuario guest
+        guest_user = User.get_or_none(User.guest_id == guest_id)
+
+        if not guest_user:
+            return jsonify({
+                'success': False,
+                'message': 'Guest user not found'
+            }), 404
+
+        # Fusionar carrito
+        merge_result = merge_cart(guest_user.id_user, real_user_id)
+
+        return jsonify({
+            'success': True,
+            'merged_items': merge_result['total_items'],
+            'message': 'Cart successfully merged'
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error in manual cart merge: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error merging cart: {str(e)}'
+        }), 500
+
+
+@app.route('/api/guest/cleanup', methods=['DELETE'])
+@require_auth
+def cleanup_old_guests():
+    """
+    Eliminar usuarios guest inactivos (más de 30 días)
+    Requiere autenticación
+    """
+    try:
+        # Calcular fecha límite (30 días atrás)
+        cleanup_days = int(os.getenv('GUEST_CLEANUP_DAYS', 30))
+        cutoff_date = datetime.now() - timedelta(days=cleanup_days)
+
+        # Buscar guests antiguos
+        old_guests = User.select().where(
+            (User.is_guest == True) &
+            (User.created_at < cutoff_date)
+        )
+
+        deleted_guests = 0
+        deleted_cart_items = 0
+
+        for guest in old_guests:
+            # Eliminar items del carrito
+            cart_count = Cart.delete().where(Cart.id_user == guest.id_user).execute()
+            deleted_cart_items += cart_count
+
+            # Eliminar usuario
+            guest.delete_instance()
+            deleted_guests += 1
+
+        app.logger.info(f"Cleanup: {deleted_guests} guests, {deleted_cart_items} cart items")
+
+        return jsonify({
+            'success': True,
+            'deleted_guests': deleted_guests,
+            'deleted_cart_items': deleted_cart_items,
+            'message': f'Cleanup completed: {deleted_guests} guests deleted'
+        }), 200
+
+    except Exception as e:
+        app.logger.error(f"Error in cleanup: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error during cleanup: {str(e)}'
+        }), 500
 
 
 # CRUD para usuario (peewee)
@@ -633,7 +1064,29 @@ def add_to_cart():
         # Convertir y procesar
         user_id = int(user_id)
         product_id = int(product_id)
-        
+
+        # VALIDAR QUE EL USUARIO EXISTA
+        user_exists = User.get_or_none(User.id_user == user_id)
+        if not user_exists:
+            if is_json_request:
+                return jsonify({
+                    'success': False,
+                    'error': 'User does not exist. Please create a guest user first.'
+                }), 404
+            else:
+                return redirect(url_for('cart_view', user_id=user_id, error='Usuario no encontrado'))
+
+        # VALIDAR QUE EL PRODUCTO EXISTA
+        product_exists = Product.get_or_none(Product.id_product == product_id)
+        if not product_exists:
+            if is_json_request:
+                return jsonify({
+                    'success': False,
+                    'error': 'Product does not exist'
+                }), 404
+            else:
+                return redirect(url_for('cart_view', user_id=user_id, error='Producto no encontrado'))
+
         # Buscar si el producto ya existe en el carrito del usuario
         carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == product_id))
         
