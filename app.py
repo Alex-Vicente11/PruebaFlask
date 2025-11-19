@@ -283,8 +283,8 @@ def health_check():
             try:
                 User.select().limit(1).count()
                 db_status = 'connected'
-                except Exception:
-                    db_status = 'error'
+            except Exception:
+                db_status = 'error'
         else:
             db_status = 'disconnected'
 
@@ -953,7 +953,7 @@ def get_cart_count():
         }), 500
 
 
-@app.route('/api/cart/check/<int: product_id>', methods=['GET'])
+@app.route('/api/cart/check/<int:product_id>', methods=['GET'])
 @require_auth
 def check_product_in_cart(product_id):
     """
@@ -1359,43 +1359,6 @@ def add_to_cart_legacy():
         return redirect(f'/cart-view?error={str(e)}')
 
 
-# ====================
-# LEGACY CART ENDPOINTS (KEPT FOR WEB VIEWS)
-# ====================
-
-@app.route('/cart/user/<int:user_id>', methods=['GET'])
-def get_cart_items_by_user(user_id):
-    """
-    LEGACY: Obtener items del carrito por user_id
-    
-    NOTA: Este endpoint NO está protegido y se mantiene solo para vistas web.
-    Android debe usar /api/cart/items con JWT.
-    """
-    try:
-        cart_items = Cart.select().where(Cart.id_user == user_id)
-
-        if not cart_items.exists():
-            return jsonify([]), 200
-        
-        result = []
-        for cart_item in cart_items:
-            product = Product.get_by_id(cart_item.id_product)
-        
-            result.append({
-                'product': {
-                    'id_product': product.id_product,
-                    'product': product.product,
-                    'price': float(product.price)
-                },
-                'quantity': cart_item.quantity,
-                'addedDate': cart_item.added_date.strftime('%Y-%m-%d %H:%M:%S')
-            })
-
-        return jsonify(result), 200
-    
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 
 @app.route('/cart/<int:user_id>/<int:product_id>', methods=['GET'])
 def get_cart_item(user_id, product_id):
@@ -1415,7 +1378,7 @@ def get_cart_item(user_id, product_id):
                 'quantity': carrito.quantity
             }), 200
         else: 
-            return jsonify(None), 404
+            return jsonify(None), 404 # No existe en el carrito
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1502,11 +1465,14 @@ def remove_from_cart():
         cart_id = request.form.get('cart_id')
         user_id = request.form.get('user_id')
 
+        # Validación de parámetros requeridos
         if not cart_id: 
             return redirect(f'/cart?user_id={user_id or ""}')
         
+        # Buscar el producto en el carrito
         remove_product = Cart.get_or_none(cart_id == Cart.id_cart)
 
+        # Verificar que existe antes de eliminar
         if remove_product:
             remove_product.delete_instance()
 
@@ -1514,7 +1480,6 @@ def remove_from_cart():
     
     except Exception as e:
         return redirect(f'/cart?user_id={user_id or ""}')
-
 
 # CRUD para usuario (peewee)
 # GET /users - Obtener todos los usuarios
@@ -1948,9 +1913,18 @@ def cart_view():
                              success=False)
 
 
+# ====================
+# LEGACY CART ENDPOINTS (KEPT FOR WEB VIEWS)
+# ====================
 @app.route('/cart/user/<int:user_id>', methods=['GET'])
 def get_cart_items_by_user(user_id):
     try:
+        """
+    LEGACY: Obtener items del carrito por user_id
+    
+    NOTA: Este endpoint NO está protegido y se mantiene solo para vistas web.
+    Android debe usar /api/cart/items con JWT.
+    """
         # Obtener todos los items del carrito para el usuario
         cart_items = Cart.select().where(Cart.id_user == user_id)
 
@@ -1978,23 +1952,6 @@ def get_cart_items_by_user(user_id):
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/cart/<int:user_id>/<int:product_id>', methods=['GET'])
-def get_cart_item(user_id, product_id):
-    try:
-        carrito = Cart.get_or_none((Cart.id_user == user_id) & (Cart.id_product == product_id))
-
-        if carrito:
-            return jsonify({
-                'id_cart': carrito.id_cart,
-                'id_user': carrito.id_user.id_user,
-                'id_product': carrito.id_product.id_product,
-                'quantity': carrito.quantity
-            }), 200
-        else: 
-            return jsonify(None), 404 # No existe en el carrito
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/add-to-cart', methods=['POST'])
@@ -2076,96 +2033,6 @@ def add_to_cart():
             return jsonify({'success': False, 'error': str(e)}), 500
         else:
             return redirect(f'/cart-view?error={str(e)}')
-
-
-@app.route('/cart/<int:cart_id>', methods=['PUT'])
-def update_cart_quantity(cart_id):
-    try:
-        data = request.get_json()
-        
-        if not data or 'quantity' not in data:
-            return jsonify({'success': False, 'error': 'Quantity requerida'}), 400
-        
-        quantity = int(data['quantity'])
-
-        if quantity < 0:
-            return jsonify({'success': False, 'error': 'Cantidad no puede ser negativa'}), 400
-        
-        cart_item = Cart.get_or_none(Cart.id_cart == cart_id)
-
-        if not cart_item:
-            return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
-        
-        if quantity == 0:
-            # Eliminar si cantidad es 0
-            cart_item.delete_instance()
-            return jsonify({
-                'success': True,
-                'message': 'Item eliminado del carrito'
-            }), 200
-        else: 
-            # Actualizar cantidad
-            cart_item.quantity = quantity
-            cart_item.save()
-
-            return jsonify({
-                'success': True,
-                'message': 'Cantidad actualizada',
-                'data': {
-                    'id_cart': cart_item.id_cart,
-                    'id_user': cart_item.id_user.id_user,
-                    'id_product': cart_item.id_product.id_product,
-                    'quantity': cart_item.quantity
-                }
-            }), 200
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-    
-
-
-@app.route('/cart/<int:cart_id>', methods=['DELETE'])
-def delete_cart_item(cart_id):
-    try:
-        cart_item = Cart.get_or_none(Cart.id_cart == cart_id)
-
-        if not cart_item:
-            return jsonify({'success': False, 'error': 'Item no encontrado'}), 404
-        
-        cart_item.delete_instance()
-
-        return jsonify({
-            'success': True,
-            'message': 'Item eliminado del carrito'
-        }), 200
-    
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-
-# Remover producto del carrito
-@app.route('/remove-from-cart', methods=['POST'])
-def remove_from_cart():
-    try:
-        cart_id = request.form.get('cart_id')
-        user_id = request.form.get('user_id')
-
-        # Validación de parámetros requeridos
-        if not cart_id: 
-            return redirect(f'/cart?user_id={user_id or ""}')
-        
-        # Buscar el producto en el carrito
-        remove_product = Cart.get_or_none(cart_id == Cart.id_cart)
-
-        # Verificar que existe antes de eliminar
-        if remove_product:
-            remove_product.delete_instance()
-
-        return redirect(f'/cart?user_id={user_id}')
-    
-    except Exception as e:
-        return redirect(f'/cart?user_id={user_id or ""}')
 
 
 if __name__=='__main__': #se comprueba la aplicacion
